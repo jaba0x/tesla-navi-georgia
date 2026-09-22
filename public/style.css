@@ -75,6 +75,16 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .round-btn.active { background: var(--accent); color: #fff; }
 #view3dBtn { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
 
+/* Start-up error */
+.boot-error {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(560px, calc(100vw - 48px)); z-index: 30;
+  background: var(--bg); color: var(--fg); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 24px; text-align: center;
+}
+.boot-error-title { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
+.boot-error-detail { color: var(--danger); word-break: break-word; margin-bottom: 10px; }
+
 /* Toast */
 .toast {
   position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);

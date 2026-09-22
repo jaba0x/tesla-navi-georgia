@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GeoDrive browser check</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; background:#12161a; color:#eef1f4;
+         margin:0; padding:16px 20px; font-size:19px; }
+  h1 { font-size:22px; margin:0 0 12px; }
+  table { border-collapse:collapse; width:100%; }
+  td { padding:7px 6px; border-bottom:1px solid #2d333b; vertical-align:top; }
+  td:first-child { color:#9aa5b1; width:42%; }
+  .ok { color:#3fb950; font-weight:700; }
+  .no { color:#ff6b6b; font-weight:700; }
+  #ua { font-size:14px; color:#9aa5b1; word-break:break-all; margin-top:14px; }
+</style>
+</head>
+<body>
+<h1>GeoDrive browser check</h1>
+<table id="t"></table>
+<div id="ua"></div>
+<script>
+(function () {
+  var rows = [];
+  function add(name, value) {
+    var ok = value === true;
+    var bad = value === false;
+    rows.push('<tr><td>' + name + '</td><td class="' + (ok ? 'ok' : bad ? 'no' : '') + '">' +
+      (ok ? 'YES' : bad ? 'NO' : value) + '</td></tr>');
+  }
+
+  function gl(type) {
+    try {
+      var c = document.createElement('canvas');
+      var ctx = c.getContext(type) || (type === 'webgl' ? c.getContext('experimental-webgl') : null);
+      return ctx ? ctx : null;
+    } catch (e) { return null; }
+  }
+
+  var gl2 = gl('webgl2');
+  var gl1 = gl('webgl');
+  add('WebGL 2 (MapLibre 5 needs this)', !!gl2);
+  add('WebGL 1 (MapLibre 4 needs this)', !!gl1);
+
+  var anyGl = gl2 || gl1;
+  if (anyGl) {
+    try {
+      var dbg = anyGl.getExtension('WEBGL_debug_renderer_info');
+      add('Graphics', dbg ? anyGl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : anyGl.getParameter(anyGl.RENDERER));
+    } catch (e) { add('Graphics', 'unknown'); }
+  }
+
+  function supports(code) { try { eval(code); return true; } catch (e) { return false; } }
+  add('Optional chaining  a?.b', supports('var o={};o?.x'));
+  add('Nullish  a ?? b', supports('var x=null; x ?? 1'));
+  add('Object spread  {...o}', supports('var o={a:1}; var p={...o}'));
+  add('Async / await', supports('(async function(){})'));
+  add('Arrow functions', supports('(()=>1)()'));
+  add('Template strings', supports('`a`'));
+  add('Class syntax', supports('class A{}'));
+  add('Array.flatMap', typeof [].flatMap === 'function');
+  add('Object.assign', typeof Object.assign === 'function');
+  add('fetch', typeof fetch === 'function');
+  add('Promise', typeof Promise === 'function');
+  add('Geolocation', !!(navigator && navigator.geolocation));
+  add('Speech (voice guidance)', 'speechSynthesis' in window);
+  add('localStorage', (function () { try { localStorage.setItem('t', '1'); return true; } catch (e) { return false; } })());
+  add('Screen', window.innerWidth + ' x ' + window.innerHeight + ' @' + (window.devicePixelRatio || 1) + 'x');
+
+  document.getElementById('t').innerHTML = rows.join('');
+  document.getElementById('ua').textContent = navigator.userAgent;
+
+  // Report back so the server log shows what this browser can do
+  try {
+    var img = new Image();
+    img.src = '/api/probe?webgl2=' + (!!gl2) + '&webgl1=' + (!!gl1) +
+      '&w=' + window.innerWidth + '&ua=' + encodeURIComponent(navigator.userAgent).slice(0, 300);
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>

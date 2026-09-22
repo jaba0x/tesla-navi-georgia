@@ -8,6 +8,12 @@
 
   const N = window.GeoNav;
 
+  // Older car screens (for example a 2018 Model 3) only have WebGL 1. boot.js loads the
+  // older map library for them; here we also drop the heavy parts: terrain, hill shading,
+  // 3D buildings and the 60 fps camera. Everything else — search, routing, guidance — is the same.
+  const LITE = window.GEODRIVE_GL === 1;
+  const CAMERA_MS = LITE ? 100 : 0; // how often the camera may be redrawn
+
   const STYLES = {
     day: 'https://tiles.openfreemap.org/styles/liberty',
     night: 'https://tiles.openfreemap.org/styles/dark',
@@ -29,7 +35,7 @@
   const $ = (id) => document.getElementById(id);
   const state = {
     theme: localGet('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day'),
-    view3d: localGet('view3d') !== 'off',
+    view3d: LITE ? localGet('view3d') === 'on' : localGet('view3d') !== 'off',
     voice: localGet('voice') !== 'off',
     position: null,     // { lon, lat, heading, speed, accuracy }
     follow: true,
@@ -45,17 +51,30 @@
   // ---------------------------------------------------------------- map
   document.body.classList.toggle('night', state.theme === 'night');
 
-  const map = new maplibregl.Map({
-    container: 'map',
-    style: STYLES[state.theme],
-    center: TBILISI,
-    zoom: 12,
-    pitch: state.view3d ? 45 : 0,
-    maxPitch: 75,
-    attributionControl: { compact: true },
+  let map;
+  try {
+    map = new maplibregl.Map({
+      container: 'map',
+      style: STYLES[state.theme],
+      center: TBILISI,
+      zoom: 12,
+      pitch: state.view3d ? 45 : 0,
+      maxPitch: 75,
+      attributionControl: { compact: true },
+    });
+  } catch (err) {
+    if (window.geodriveFail) window.geodriveFail('The map could not start on this screen', String(err && err.message || err));
+    return;
+  }
+  map.on('error', (e) => {
+    const message = (e && e.error && e.error.message) || '';
+    // Tile hiccups are normal; a WebGL or style failure means nothing will draw
+    if (/webgl|context|style/i.test(message) && window.geodriveFail) {
+      window.geodriveFail('The map could not draw on this screen', message);
+    }
   });
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
-  map.on('style.load', addOverlays);
+  map.on('style.load', () => { window.geodriveMapReady = true; addOverlays(); });
   map.on('dragstart', () => setFollow(false));
 
   function addOverlays() {
@@ -132,6 +151,11 @@
 
   // ---------------------------------------------------------------- 3D view
   function add3D() {
+    if (LITE) { // no terrain, shading or buildings on a low-power screen
+      $('view3dBtn').classList.toggle('active', state.view3d);
+      map.easeTo({ pitch: state.view3d ? 45 : 0, duration: 500 });
+      return;
+    }
     if (!map.getSource('dem')) {
       map.addSource('dem', {
         type: 'raster-dem', tiles: [DEM_TILES], tileSize: 256, maxzoom: 14,
@@ -183,6 +207,11 @@
   }
 
   function apply3D() {
+    if (LITE) {
+      $('view3dBtn').classList.toggle('active', state.view3d);
+      map.easeTo({ pitch: state.view3d ? 45 : 0, bearing: state.view3d ? map.getBearing() : 0, duration: 600 });
+      return;
+    }
     if (!map.getSource('dem')) return;
     for (const id of ['hills', 'building-3d']) {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', state.view3d ? 'visible' : 'none');
@@ -328,15 +357,19 @@
     return ((to - from + 540) % 360) - 180;
   }
 
-  function frame() {
+  let lastFrame = 0;
+  function frame(now) {
     requestAnimationFrame(frame);
+    if (CAMERA_MS && now - lastFrame < CAMERA_MS) return;
+    lastFrame = now || 0;
     const target = cameraTarget();
     if (!target) return;
 
     // The car marker glides too, so it stays put on screen between GPS fixes
     if (car.lon === null) Object.assign(car, { lon: target.car[0], lat: target.car[1], bearing: target.carBearing ?? 0 });
-    car.lon += (target.car[0] - car.lon) * 0.25;
-    car.lat += (target.car[1] - car.lat) * 0.25;
+    const k = LITE ? 0.5 : 0.25;
+    car.lon += (target.car[0] - car.lon) * k;
+    car.lat += (target.car[1] - car.lat) * k;
     if (target.carBearing !== null) car.bearing += angleDelta(car.bearing, target.carBearing) * 0.2;
     meMarker.setLngLat([car.lon, car.lat]);
     if (target.carBearing !== null) meMarker.setRotation(car.bearing);
@@ -344,15 +377,17 @@
     if (!state.follow) return;
     if (cam.lon === null) Object.assign(cam, { lon: target.lon, lat: target.lat, bearing: target.bearing, zoom: target.zoom, pitch: target.pitch });
 
-    cam.lon += (target.lon - cam.lon) * 0.12;
-    cam.lat += (target.lat - cam.lat) * 0.12;
-    cam.bearing += angleDelta(cam.bearing, target.bearing) * 0.08;
-    cam.zoom += (target.zoom - cam.zoom) * 0.05;
-    cam.pitch += (target.pitch - cam.pitch) * 0.08;
+    const ease = LITE ? 2.5 : 1;
+    cam.lon += (target.lon - cam.lon) * 0.12 * ease;
+    cam.lat += (target.lat - cam.lat) * 0.12 * ease;
+    cam.bearing += angleDelta(cam.bearing, target.bearing) * 0.08 * ease;
+    cam.zoom += (target.zoom - cam.zoom) * 0.05 * ease;
+    cam.pitch += (target.pitch - cam.pitch) * 0.08 * ease;
 
     // flat ground close up, raised terrain from a distance (with a little hysteresis)
-    const hasTerrain = Boolean(map.getTerrain());
-    if (state.view3d && cam.zoom >= TERRAIN_MAX_ZOOM && hasTerrain) map.setTerrain(null);
+    const hasTerrain = !LITE && Boolean(map.getTerrain());
+    if (LITE) { /* no terrain here */ }
+    else if (state.view3d && cam.zoom >= TERRAIN_MAX_ZOOM && hasTerrain) map.setTerrain(null);
     else if (state.view3d && cam.zoom < TERRAIN_MAX_ZOOM - 0.3 && !hasTerrain) {
       map.setTerrain({ source: 'dem', exaggeration: 1 });
     }
@@ -812,6 +847,10 @@
         if (qs.get('sim') === '1' && state.nav) { setFollow(true); startSim(); }
       });
     }
+  }
+
+  if (LITE) {
+    setTimeout(() => toast('Simple mode: this screen gets the lighter map'), 1500);
   }
 
   loadUpdates();

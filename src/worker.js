@@ -27,6 +27,10 @@ export default {
           return await route(url, ctx);
         case '/api/search':
           return await search(url, ctx);
+        case '/api/probe':
+          // /check.html pings this so the Worker log records what the car's browser supports
+          console.log('probe', JSON.stringify(Object.fromEntries(url.searchParams)));
+          return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
         case '/api/health':
           return json({ ok: true, time: new Date().toISOString() });
         default:

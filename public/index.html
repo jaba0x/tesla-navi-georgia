@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <meta name="theme-color" content="#111418" />
   <title>GeoDrive — Georgia road map</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -25,6 +24,13 @@
     <button class="round-btn" id="voiceBtn" title="Voice guidance">🔊</button>
     <button class="round-btn" id="updatesBtn" title="Road updates">⚠</button>
     <button class="round-btn" id="themeBtn" title="Day / night map">◐</button>
+  </div>
+
+  <!-- Shown when the page cannot start, instead of a blank map -->
+  <div class="boot-error" id="bootError" hidden>
+    <div class="boot-error-title" id="bootErrorText"></div>
+    <div class="boot-error-detail small" id="bootErrorDetail"></div>
+    <div class="small muted">Open tesla.jaba.ge/check.html for details about this browser.</div>
   </div>
 
   <!-- Status toast -->
@@ -75,8 +81,6 @@
     </footer>
   </aside>
 
-  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
-  <script src="/nav.js"></script>
-  <script src="/app.js"></script>
+  <script src="/boot.js"></script>
 </body>
 </html>
