@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <meta name="theme-color" content="#111418" />
   <title>GeoDrive — Georgia road map</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -21,6 +21,7 @@
   <!-- Map controls -->
   <div class="controls">
     <button class="round-btn" id="followBtn" title="Follow my location">◎</button>
+    <button class="round-btn" id="view3dBtn" title="3D view">3D</button>
     <button class="round-btn" id="updatesBtn" title="Road updates">⚠</button>
     <button class="round-btn" id="themeBtn" title="Day / night map">◐</button>
   </div>
@@ -58,11 +59,11 @@
     <p class="muted" id="updatesMeta"></p>
     <ul id="updatesList" class="updates-list"></ul>
     <footer class="muted small">
-      Map © OpenStreetMap contributors · Tiles OpenFreeMap · Routing OSRM · Search Photon
+      Map © OpenStreetMap contributors · Tiles OpenFreeMap · Terrain Mapzen / AWS · Routing OSRM · Search Photon
     </footer>
   </aside>
 
-  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

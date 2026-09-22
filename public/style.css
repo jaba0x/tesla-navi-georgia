@@ -73,6 +73,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: var(--bg); color: var(--fg); box-shadow: var(--shadow); font-size: 26px;
 }
 .round-btn.active { background: var(--accent); color: #fff; }
+#view3dBtn { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
 
 /* Toast */
 .toast {

@@ -19,6 +19,9 @@ export default {
     }
 
     try {
+      const dem = url.pathname.match(/^\/api\/dem\/(\d{1,2})\/(\d+)\/(\d+)\.png$/);
+      if (dem) return await demTile(ctx, dem.slice(1).map(Number));
+
       switch (url.pathname) {
         case '/api/route':
           return await route(url, ctx);
@@ -65,6 +68,44 @@ async function search(url, ctx) {
   }
 
   return cachedJson(ctx, `search/${params}`, 86400, `${PHOTON_URL}?${params}`);
+}
+
+// GET /api/dem/{z}/{x}/{y}.png — elevation tiles for the 3D terrain.
+// Proxied because the upstream bucket sends no CORS header, which the 3D
+// renderer needs. Only tiles covering Georgia are fetched, and they never change,
+// so they are cached for a long time.
+async function demTile(ctx, [z, x, y]) {
+  const max = 2 ** z;
+  if (z > 14 || x >= max || y >= max || !tileTouchesGeorgia(z, x, y)) {
+    return new Response(null, { status: 204, headers: { 'Cache-Control': 'public, max-age=604800' } });
+  }
+
+  const cache = caches.default;
+  const cacheKey = new Request(`https://geodrive.cache/dem/${z}/${x}/${y}.png`);
+  const hit = await cache.match(cacheKey);
+  if (hit) return hit;
+
+  const upstream = await fetch(
+    `https://elevation-tiles-prod.s3.amazonaws.com/terrarium/${z}/${x}/${y}.png`,
+  );
+  if (!upstream.ok) throw httpError(502, `Elevation tiles returned ${upstream.status}`);
+
+  const res = new Response(upstream.body, {
+    headers: { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=604800' },
+  });
+  ctx.waitUntil(cache.put(cacheKey, res.clone()));
+  return res;
+}
+
+function tileTouchesGeorgia(z, x, y) {
+  const [minLon, minLat, maxLon, maxLat] = GEORGIA_BBOX.split(',').map(Number);
+  const n = 2 ** z;
+  const lon = (i) => (i / n) * 360 - 180;
+  const lat = (j) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * j) / n))) * 180) / Math.PI;
+  // a small margin so the horizon beyond the border still has relief
+  const m = 0.5;
+  return lon(x + 1) >= minLon - m && lon(x) <= maxLon + m &&
+    lat(y) >= minLat - m && lat(y + 1) <= maxLat + m;
 }
 
 // ---------- helpers ----------

@@ -18,6 +18,10 @@
     charger: '#1a7f37',
     info: '#1f6feb',
   };
+  // Elevation tiles (Mapzen terrarium data on AWS Open Data), proxied by our Worker
+  const DEM_TILES = '/api/dem/{z}/{x}/{y}.png';
+  const NAV_PITCH = 58;
+  const NAV_ZOOM = 16.5;
   const OFF_ROUTE_METERS = 80;
   const REROUTE_COOLDOWN_MS = 15000;
   const STEP_ADVANCE_METERS = 25;
@@ -32,6 +36,7 @@
     stepIndex: 0,
     lastReroute: 0,
     updates: [],
+    view3d: localGet('view3d') !== 'off',
   };
 
   // ---------------------------------------------------------------- map
@@ -42,6 +47,8 @@
     style: STYLES[state.theme],
     center: TBILISI,
     zoom: 12,
+    pitch: state.view3d ? 45 : 0,
+    maxPitch: 75,
     attributionControl: { compact: true },
   });
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
@@ -50,6 +57,7 @@
   map.on('dragstart', () => setFollow(false));
 
   function addOverlays() {
+    add3D();
     if (!map.getSource('route')) {
       map.addSource('route', { type: 'geojson', data: emptyFC() });
       map.addLayer({
@@ -80,6 +88,111 @@
     if (state.route) drawRoute(state.route);
   }
 
+  // ---------------------------------------------------------------- 3D view
+  function add3D() {
+    if (!map.getSource('dem')) {
+      map.addSource('dem', {
+        type: 'raster-dem',
+        tiles: [DEM_TILES],
+        tileSize: 256,
+        maxzoom: 14,
+        encoding: 'terrarium',
+        attribution: 'Elevation: Mapzen / AWS Open Data',
+      });
+    }
+    if (!map.getLayer('hills')) {
+      const firstSymbol = map.getStyle().layers.find((l) => l.type === 'symbol');
+      map.addLayer({
+        id: 'hills', type: 'hillshade', source: 'dem',
+        layout: { visibility: state.view3d ? 'visible' : 'none' },
+        paint: {
+          'hillshade-exaggeration': 0.45,
+          'hillshade-shadow-color': state.theme === 'night' ? '#05070a' : '#4a4332',
+        },
+      }, firstSymbol && firstSymbol.id);
+    }
+    // The dark style has no 3D buildings of its own — add them
+    if (!map.getLayer('building-3d') && map.getSource('openmaptiles')) {
+      map.addLayer({
+        id: 'building-3d', type: 'fill-extrusion', source: 'openmaptiles',
+        'source-layer': 'building', minzoom: 14,
+        layout: { visibility: state.view3d ? 'visible' : 'none' },
+        paint: {
+          'fill-extrusion-base': ['get', 'render_min_height'],
+          'fill-extrusion-height': ['get', 'render_height'],
+          'fill-extrusion-color': state.theme === 'night' ? '#2b323a' : 'hsl(35,8%,85%)',
+          'fill-extrusion-opacity': 0.85,
+        },
+      });
+    }
+    setSky();
+    apply3D();
+  }
+
+  function setSky() {
+    if (!map.setSky) return; // older MapLibre
+    map.setSky(state.theme === 'night'
+      ? { 'sky-color': '#0b1220', 'horizon-color': '#1b2735', 'fog-color': '#1b1f24', 'fog-ground-blend': 0.6, 'horizon-fog-blend': 0.6, 'sky-horizon-blend': 0.8 }
+      : { 'sky-color': '#7ab6ef', 'horizon-color': '#d6e8fa', 'fog-color': '#eaf1f8', 'fog-ground-blend': 0.55, 'horizon-fog-blend': 0.6, 'sky-horizon-blend': 0.8 });
+  }
+
+  function apply3D() {
+    if (!map.getSource('dem')) return;
+    for (const id of ['hills', 'building-3d']) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', state.view3d ? 'visible' : 'none');
+    }
+    if (state.view3d) {
+      // no exaggeration: with a tilted camera, exaggerated hills swallow the view
+      map.setTerrain({ source: 'dem', exaggeration: 1 });
+      if (map.getPitch() < 20) map.easeTo({ pitch: state.route ? NAV_PITCH : 45, duration: 700 });
+    } else {
+      map.setTerrain(null);
+      map.easeTo({ pitch: 0, bearing: 0, duration: 700 });
+    }
+    $('view3dBtn').classList.toggle('active', state.view3d);
+  }
+
+  $('view3dBtn').onclick = () => {
+    state.view3d = !state.view3d;
+    localSet('view3d', state.view3d ? 'on' : 'off');
+    apply3D();
+    toast(state.view3d ? '3D view on' : '3D view off');
+  };
+
+  // Camera for follow mode: in 3D while driving the map tilts and turns with you,
+  // so the road ahead is always at the top of the screen.
+  function cameraFollow(first) {
+    if (!state.follow || !state.position) return;
+    const { lon, lat, heading, speed } = state.position;
+    const navigating = Boolean(state.route);
+    const opts = { center: [lon, lat], duration: first ? 0 : 900 };
+
+    if (state.view3d) {
+      opts.pitch = navigating ? NAV_PITCH : Math.max(map.getPitch(), 45);
+      const bearing = Number.isFinite(heading) && speed > 1 ? heading : bearingToNextManeuver();
+      if (bearing !== null) opts.bearing = bearing;
+    }
+    if (first || navigating) opts.zoom = navigating ? NAV_ZOOM : Math.max(map.getZoom(), 15);
+
+    map.easeTo(opts);
+  }
+
+  // Direction from here to the next turn — used when the GPS gives no heading (standing still)
+  function bearingToNextManeuver() {
+    if (!state.route || !state.position) return null;
+    const steps = allSteps();
+    const next = steps[state.stepIndex + 1] || steps[state.stepIndex];
+    if (!next) return null;
+    const a = [state.position.lon, state.position.lat];
+    const b = next.maneuver.location;
+    if (haversine(a, b) < 15) return null;
+    const rad = Math.PI / 180;
+    const y = Math.sin((b[0] - a[0]) * rad) * Math.cos(b[1] * rad);
+    const x = Math.cos(a[1] * rad) * Math.sin(b[1] * rad) -
+      Math.sin(a[1] * rad) * Math.cos(b[1] * rad) * Math.cos((b[0] - a[0]) * rad);
+    return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+  }
+
   // Tap on an update marker → details. Tap elsewhere → "Route here".
   map.on('click', (e) => {
     const hits = map.queryRenderedFeatures(e.point, { layers: ['updates-dot', 'updates-halo'] });
@@ -106,7 +219,9 @@
   const meEl = document.createElement('div');
   meEl.className = 'me';
   meEl.innerHTML = '<div class="heading" hidden></div>';
-  const meMarker = new maplibregl.Marker({ element: meEl, rotationAlignment: 'map' });
+  const meMarker = new maplibregl.Marker({
+    element: meEl, rotationAlignment: 'map', pitchAlignment: 'map',
+  });
 
   if ('geolocation' in navigator) {
     navigator.geolocation.watchPosition(onPosition, onPositionError, {
@@ -126,13 +241,7 @@
     meEl.querySelector('.heading').hidden = !hasHeading;
     if (hasHeading) meMarker.setRotation(heading);
 
-    if (state.follow) {
-      map.easeTo({
-        center: [lon, lat],
-        zoom: first ? 15 : map.getZoom(),
-        duration: first ? 0 : 800,
-      });
-    }
+    cameraFollow(first);
     if (state.route) trackProgress();
   }
 
@@ -144,7 +253,7 @@
   function setFollow(on) {
     state.follow = on;
     $('followBtn').classList.toggle('active', on);
-    if (on && state.position) map.easeTo({ center: [state.position.lon, state.position.lat], zoom: Math.max(map.getZoom(), 15) });
+    if (on) cameraFollow(false);
   }
   $('followBtn').onclick = () => setFollow(!state.follow);
   setFollow(true);
@@ -246,6 +355,8 @@
       if (fitView) {
         setFollow(false);
         fitToRoute(state.route);
+        // After showing the whole route, drop back into the driving view
+        if (state.position) setTimeout(() => setFollow(true), 2600);
       }
     } catch {
       toast('Routing failed — check your connection');
@@ -261,7 +372,10 @@
     const b = new maplibregl.LngLatBounds();
     route.geometry.coordinates.forEach((c) => b.extend(c));
     const panel = $('routePanel').getBoundingClientRect();
-    map.fitBounds(b, { padding: { top: 100, bottom: 60, right: 100, left: innerWidth > 900 ? panel.width + 40 : 40 }, maxZoom: 16 });
+    map.fitBounds(b, {
+      padding: { top: 100, bottom: 60, right: 100, left: innerWidth > 900 ? panel.width + 40 : 40 },
+      maxZoom: 16, pitch: 0, bearing: 0,
+    });
   }
 
   function endRoute() {
@@ -530,4 +644,7 @@
 
   loadUpdates();
   map.once('load', openDeepLink);
+
+  // Handy for debugging from the browser console
+  window.geodrive = { map, state };
 })();
