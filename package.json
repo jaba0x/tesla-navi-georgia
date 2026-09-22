@@ -1,0 +1,13 @@
+{
+  "name": "georgia-drive-map",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Big-screen map with routing and road updates for drivers in Georgia",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

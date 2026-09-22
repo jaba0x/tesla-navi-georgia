@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="theme-color" content="#111418" />
+  <title>GeoDrive — Georgia road map</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="map"></div>
+
+  <!-- Search -->
+  <div class="card search" id="searchCard">
+    <input id="searchInput" type="search" placeholder="Search a place in Georgia…" autocomplete="off" />
+    <button class="icon-btn" id="clearSearch" title="Clear" hidden>✕</button>
+    <ul id="searchResults" class="results" hidden></ul>
+  </div>
+
+  <!-- Map controls -->
+  <div class="controls">
+    <button class="round-btn" id="followBtn" title="Follow my location">◎</button>
+    <button class="round-btn" id="updatesBtn" title="Road updates">⚠</button>
+    <button class="round-btn" id="themeBtn" title="Day / night map">◐</button>
+  </div>
+
+  <!-- Status toast -->
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- Route panel -->
+  <div class="card route" id="routePanel" hidden>
+    <div class="next">
+      <div class="next-arrow" id="nextArrow">↑</div>
+      <div class="next-text">
+        <div class="next-dist" id="nextDist"></div>
+        <div class="next-instr" id="nextInstr"></div>
+      </div>
+    </div>
+    <div class="route-meta">
+      <span id="routeEta"></span>
+      <span id="routeDist"></span>
+      <span id="routeTime"></span>
+    </div>
+    <div class="route-actions">
+      <button class="btn" id="stepsToggle">Steps</button>
+      <button class="btn danger" id="endRoute">End</button>
+    </div>
+    <ol id="stepsList" class="steps" hidden></ol>
+  </div>
+
+  <!-- Road updates panel -->
+  <aside class="card updates" id="updatesPanel" hidden>
+    <header>
+      <h2>Road updates</h2>
+      <button class="icon-btn" id="closeUpdates" title="Close">✕</button>
+    </header>
+    <p class="muted" id="updatesMeta"></p>
+    <ul id="updatesList" class="updates-list"></ul>
+    <footer class="muted small">
+      Map © OpenStreetMap contributors · Tiles OpenFreeMap · Routing OSRM · Search Photon
+    </footer>
+  </aside>
+
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
