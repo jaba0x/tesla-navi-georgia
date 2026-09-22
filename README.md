@@ -4,9 +4,8 @@ A big-screen web map for drivers in Georgia 🇬🇪, made to work well in a car
 
 - Live GPS position with follow mode
 - Place search limited to Georgia
-- Turn-by-turn route with ETA, step list and automatic re-routing
+- Turn-by-turn navigation: chase camera that tilts, turns and zooms in for each turn, maneuver arrows, a "then" preview of the turn after next, live distance, ETA and progress, spoken instructions, automatic re-routing
 - Road updates layer (closures, works, hazards, EV chargers) from `public/updates.json`
-- 3D driving view: tilted camera that turns with you, 3D buildings, real terrain and hill shading (3D button)
 - Day / night map
 
 Not affiliated with Tesla, Inc.
@@ -20,7 +19,6 @@ Not affiliated with Tesla, Inc.
 | Map library | [MapLibre GL JS](https://maplibre.org) |
 | Routing | [OSRM](https://project-osrm.org) public server, via `/api/route` |
 | Search | [Photon](https://photon.komoot.io), via `/api/search` |
-| 3D terrain | Mapzen terrarium elevation tiles on AWS Open Data, via `/api/dem/{z}/{x}/{y}.png` |
 | Live traffic | [TomTom Traffic Flow](https://developer.tomtom.com) raster tiles, via `/api/traffic/flow/{z}/{x}/{y}.png` |
 
 ### Live traffic setup
@@ -35,7 +33,8 @@ The public OSRM and Photon servers are free but rate-limited and meant for light
 ## Project layout
 
 ```
-public/          static site (index.html, app.js, style.css, updates.json)
+public/          static site (index.html, app.js, nav.js, style.css, updates.json)
+                 nav.js holds the route geometry, wording and maneuver arrows
 src/worker.js    Cloudflare Worker: /api/route, /api/search, /api/health
 wrangler.jsonc   Worker config
 ```
@@ -51,6 +50,11 @@ npm run dev        # http://localhost:8787
 
 Connected to Cloudflare Workers Builds: every push to `main` deploys automatically.
 Manual deploy: `npm run deploy`.
+
+## Demo drive
+
+Add `&sim=1` to a destination link to drive the route automatically, without GPS:
+`/?to=44.8010,41.7250&name=Rike%20Park&sim=1`
 
 ## Publishing road updates
 

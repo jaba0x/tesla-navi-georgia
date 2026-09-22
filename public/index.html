@@ -22,6 +22,7 @@
   <div class="controls">
     <button class="round-btn" id="followBtn" title="Follow my location">◎</button>
     <button class="round-btn" id="view3dBtn" title="3D view">3D</button>
+    <button class="round-btn" id="voiceBtn" title="Voice guidance">🔊</button>
     <button class="round-btn" id="updatesBtn" title="Road updates">⚠</button>
     <button class="round-btn" id="themeBtn" title="Day / night map">◐</button>
   </div>
@@ -29,24 +30,35 @@
   <!-- Status toast -->
   <div id="toast" class="toast" hidden></div>
 
-  <!-- Route panel -->
+  <!-- Navigation panel -->
   <div class="card route" id="routePanel" hidden>
     <div class="next">
-      <div class="next-arrow" id="nextArrow">↑</div>
+      <div class="next-arrow" id="nextArrow"></div>
       <div class="next-text">
         <div class="next-dist" id="nextDist"></div>
         <div class="next-instr" id="nextInstr"></div>
       </div>
     </div>
+
+    <div class="then" id="thenRow" hidden>
+      <span class="muted small">then</span>
+      <span class="then-arrow" id="thenArrow"></span>
+      <span class="then-instr" id="thenInstr"></span>
+    </div>
+
+    <div class="progress"><div class="progress-bar" id="routeBar"></div></div>
+
     <div class="route-meta">
       <span id="routeEta"></span>
       <span id="routeDist"></span>
       <span id="routeTime"></span>
     </div>
+
     <div class="route-actions">
       <button class="btn" id="stepsToggle">Steps</button>
       <button class="btn danger" id="endRoute">End</button>
     </div>
+
     <ol id="stepsList" class="steps" hidden></ol>
   </div>
 
@@ -64,6 +76,7 @@
   </aside>
 
   <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
+  <script src="/nav.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
