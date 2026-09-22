@@ -447,7 +447,9 @@
     renderSteps();
     if (state.position) trackProgress();
     updateBanner();
-    $('routePanel').hidden = false;
+    const panel = $('routePanel');
+    panel.hidden = false;
+    panel.classList.add('collapsed'); // start small; tap the bar for the details
 
     if (preview) {
       setFollow(false);
@@ -497,6 +499,12 @@
     $('clearSearch').hidden = true;
     if (arrived) speak('You have arrived at your destination');
   }
+  // Tap the turn bar to show or hide the trip details
+  $('navSummary').onclick = () => {
+    const panel = $('routePanel');
+    panel.classList.toggle('collapsed');
+    if (panel.classList.contains('collapsed')) $('stepsList').hidden = true;
+  };
   $('endRoute').onclick = () => endNavigation(false);
   $('stepsToggle').onclick = () => { $('stepsList').hidden = !$('stepsList').hidden; };
 

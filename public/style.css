@@ -94,7 +94,29 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* Route panel */
 .route { left: 16px; bottom: 16px; width: min(460px, calc(100vw - 32px)); padding: 16px; max-height: 70vh; display: flex; flex-direction: column; }
-.next { display: flex; gap: 16px; align-items: center; }
+.next {
+  display: flex; gap: 16px; align-items: center; width: 100%;
+  background: transparent; border: 0; padding: 0; text-align: left; color: inherit;
+}
+.chev {
+  margin-left: auto; flex: none; width: 26px; height: 26px; color: var(--muted);
+  border-right: 3px solid currentColor; border-bottom: 3px solid currentColor;
+  transform: rotate(45deg) scale(0.55); transform-origin: center;
+}
+.route.collapsed .chev { transform: rotate(-135deg) scale(0.55); }
+
+/* Collapsed: just the next turn. Tap it for the rest. */
+.route.collapsed { padding: 10px 14px; width: min(430px, calc(100vw - 32px)); }
+.route.collapsed .next-arrow { width: 58px; height: 58px; border-radius: 13px; }
+.route.collapsed .next-arrow svg { width: 40px; height: 40px; }
+.route.collapsed .next-dist { font-size: 25px; }
+.route.collapsed .next-instr { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.route.collapsed .next-text { min-width: 0; }
+.route.collapsed .then,
+.route.collapsed .progress,
+.route.collapsed .route-actions,
+.route.collapsed .steps { display: none !important; }
+.route.collapsed .route-meta { margin: 6px 0 0; font-size: 14px; gap: 14px; }
 .next-arrow {
   flex: none; width: 76px; height: 76px; border-radius: 16px;
   background: var(--accent); color: #fff;

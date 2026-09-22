@@ -38,13 +38,14 @@
 
   <!-- Navigation panel -->
   <div class="card route" id="routePanel" hidden>
-    <div class="next">
+    <button class="next" id="navSummary" title="Show trip details">
       <div class="next-arrow" id="nextArrow"></div>
       <div class="next-text">
         <div class="next-dist" id="nextDist"></div>
         <div class="next-instr" id="nextInstr"></div>
       </div>
-    </div>
+      <span class="chev" id="navChevron" aria-hidden="true"></span>
+    </button>
 
     <div class="then" id="thenRow" hidden>
       <span class="muted small">then</span>
