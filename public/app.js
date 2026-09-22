@@ -32,8 +32,6 @@
     stepIndex: 0,
     lastReroute: 0,
     updates: [],
-    trafficAvailable: false,
-    traffic: localGet('traffic') !== 'off',
   };
 
   // ---------------------------------------------------------------- map
@@ -52,7 +50,6 @@
   map.on('dragstart', () => setFollow(false));
 
   function addOverlays() {
-    addTrafficLayer();
     if (!map.getSource('route')) {
       map.addSource('route', { type: 'geojson', data: emptyFC() });
       map.addLayer({
@@ -82,49 +79,6 @@
     }
     if (state.route) drawRoute(state.route);
   }
-
-  // ---------------------------------------------------------------- traffic (TomTom via /api/traffic)
-  function addTrafficLayer() {
-    if (!state.trafficAvailable || map.getSource('traffic')) return;
-    const dark = state.theme === 'night' ? '?dark=1' : '';
-    map.addSource('traffic', {
-      type: 'raster',
-      tiles: [`${location.origin}/api/traffic/flow/{z}/{x}/{y}.png${dark}`],
-      tileSize: 512,
-      minzoom: 5,
-      maxzoom: 18,
-      attribution: 'Traffic © TomTom',
-    });
-    // Draw traffic under the map labels so street names stay readable
-    const firstSymbol = map.getStyle().layers.find((l) => l.type === 'symbol');
-    map.addLayer({
-      id: 'traffic', type: 'raster', source: 'traffic',
-      layout: { visibility: state.traffic ? 'visible' : 'none' },
-      paint: { 'raster-opacity': 0.9 },
-    }, firstSymbol && firstSymbol.id);
-  }
-
-  function setTraffic(on) {
-    state.traffic = on;
-    localSet('traffic', on ? 'on' : 'off');
-    $('trafficBtn').classList.toggle('active', on && state.trafficAvailable);
-    if (map.getLayer('traffic')) map.setLayoutProperty('traffic', 'visibility', on ? 'visible' : 'none');
-  }
-
-  $('trafficBtn').onclick = () => {
-    if (!state.trafficAvailable) { toast('Live traffic is not set up yet'); return; }
-    setTraffic(!state.traffic);
-    toast(state.traffic ? 'Live traffic on' : 'Live traffic off');
-  };
-
-  fetch('/api/config')
-    .then((r) => r.json())
-    .then((cfg) => {
-      state.trafficAvailable = Boolean(cfg.traffic);
-      try { addTrafficLayer(); } catch { /* style not ready — style.load will add it */ }
-      setTraffic(state.traffic);
-    })
-    .catch(() => {});
 
   // Tap on an update marker → details. Tap elsewhere → "Route here".
   map.on('click', (e) => {

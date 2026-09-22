@@ -19,14 +19,6 @@ Not affiliated with Tesla, Inc.
 | Map library | [MapLibre GL JS](https://maplibre.org) |
 | Routing | [OSRM](https://project-osrm.org) public server, via `/api/route` |
 | Search | [Photon](https://photon.komoot.io), via `/api/search` |
-| Live traffic | [TomTom Traffic Flow](https://developer.tomtom.com) raster tiles, via `/api/traffic/flow/{z}/{x}/{y}.png` |
-
-### Live traffic setup
-
-The Worker needs a TomTom API key in a secret called `TOMTOM_KEY`
-(Cloudflare dashboard → Workers → tesla → Settings → Variables and Secrets).
-For local dev, put `TOMTOM_KEY=...` in `.dev.vars` (git-ignored).
-Only tiles covering Georgia are fetched, and tiles are cached for 2 minutes, to stay inside the free tier.
 
 The public OSRM and Photon servers are free but rate-limited and meant for light use. The Worker caches responses, and because the frontend only talks to `/api/*`, providers can be swapped later (OpenRouteService, GraphHopper, self-hosted Valhalla…) without touching the frontend.
 
