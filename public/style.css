@@ -143,6 +143,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .route-meta span:first-child { color: #1a7f37; font-weight: 700; }
 body.night .route-meta span:first-child { color: #3fb950; }
 .route-actions { display: flex; gap: 10px; }
+/* Before you press Start the panel shows Start / Cancel, after it shows Steps / End */
+.route .preview-only { display: none; }
+.route.preview .preview-only { display: block; }
+.route.preview .drive-only { display: none; }
+.route.preview .next-dist { font-size: 26px; }
 .btn {
   flex: 1; height: 52px; border-radius: 12px; border: 1px solid var(--line);
   background: transparent; font-weight: 600;

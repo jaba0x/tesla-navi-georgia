@@ -31,6 +31,8 @@ export default {
           // /check.html pings this so the Worker log records what the car's browser supports
           console.log('probe', JSON.stringify(Object.fromEntries(url.searchParams)));
           return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
+        case '/api/resolve':
+          return await resolveLink(url);
         case '/api/health':
           return json({ ok: true, time: new Date().toISOString() });
         default:
@@ -110,6 +112,85 @@ function tileTouchesGeorgia(z, x, y) {
   const m = 0.5;
   return lon(x + 1) >= minLon - m && lon(x) <= maxLon + m &&
     lat(y) >= minLat - m && lat(y + 1) <= maxLat + m;
+}
+
+// GET /api/resolve?url=... — turn a shared map link into coordinates.
+// Short links (maps.app.goo.gl) have to be followed server-side, and only
+// these map hosts are allowed, so this can't be used to fetch anything else.
+const MAP_HOSTS = [
+  'maps.app.goo.gl', 'goo.gl', 'maps.google.com', 'www.google.com', 'google.com',
+  'maps.apple.com', 'www.waze.com', 'waze.com', 'ul.waze.com',
+];
+
+async function resolveLink(url) {
+  const raw = (url.searchParams.get('url') || '').trim();
+  if (!raw) throw httpError(400, 'No link given');
+
+  let target;
+  try {
+    target = new URL(raw);
+  } catch {
+    throw httpError(400, 'That is not a link');
+  }
+  if (!MAP_HOSTS.includes(target.hostname)) {
+    throw httpError(400, 'Only Google, Apple or Waze map links work here');
+  }
+
+  let current = target.toString();
+  for (let hop = 0; hop < 5; hop++) {
+    const found = extractPlace(current);
+    if (found) return json(found);
+
+    const res = await fetch(current, {
+      redirect: 'manual',
+      headers: { 'User-Agent': UA, 'Accept-Language': 'en' },
+    });
+    const location = res.headers.get('location');
+    if (location) {
+      current = new URL(location, current).toString();
+      if (!MAP_HOSTS.includes(new URL(current).hostname)) {
+        throw httpError(400, 'That link leads somewhere unexpected');
+      }
+      continue;
+    }
+    if (res.ok) {
+      // Some links only reveal the place inside the page itself
+      const body = (await res.text()).slice(0, 300000);
+      const found2 = extractPlace(body);
+      if (found2) return json(found2);
+    }
+    break;
+  }
+  throw httpError(404, 'No location found in that link');
+}
+
+function extractPlace(text) {
+  const patterns = [
+    /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/,        // Google place data
+    /@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/,             // Google map centre
+    /[?&](?:q|ll|daddr|destination|center)=(-?\d{1,2}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)/i,
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) {
+      const lat = Number(m[1]);
+      const lon = Number(m[2]);
+      if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        return { lat, lon, name: extractName(text) };
+      }
+    }
+  }
+  return null;
+}
+
+function extractName(text) {
+  const m = text.match(/\/place\/([^/@?]+)/);
+  if (!m) return '';
+  try {
+    return decodeURIComponent(m[1].replace(/\+/g, ' ')).slice(0, 80);
+  } catch {
+    return '';
+  }
 }
 
 // ---------- helpers ----------

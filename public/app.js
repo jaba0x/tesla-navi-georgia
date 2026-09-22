@@ -41,6 +41,7 @@
     follow: true,
     destination: null,  // { lon, lat, name }
     nav: null,          // prepared route (see GeoNav.prepare)
+    navigating: false,  // false while previewing a route, true after Start
     progress: null,     // { traveled, stepIndex, toNext, remaining, eta }
     lastReroute: 0,
     spoken: new Set(),
@@ -272,7 +273,7 @@
     const first = !state.position;
     state.position = pos;
 
-    const progress = state.nav ? trackProgress() : null;
+    const progress = state.nav && state.navigating ? trackProgress() : null;
     // While driving a route, ride the road line instead of the raw GPS dot
     const shown = progress && progress.snapped ? progress.snapped : [pos.lon, pos.lat];
 
@@ -336,7 +337,7 @@
     if (!pos) return null;
     const here = state.progress?.snapped || [pos.lon, pos.lat];
     const bearing = drivingBearing();
-    const navigating = Boolean(state.nav && state.progress);
+    const navigating = Boolean(state.nav && state.navigating && state.progress);
     const zoom = navigating ? navZoom() : Math.max(map.getZoom(), 15);
 
     let center = here;
@@ -445,21 +446,41 @@
 
     drawRoute();
     renderSteps();
-    if (state.position) trackProgress();
+    if (state.navigating && state.position) trackProgress();
     updateBanner();
+
     const panel = $('routePanel');
     panel.hidden = false;
-    panel.classList.add('collapsed'); // start small; tap the bar for the details
 
     if (preview) {
+      // Show the whole trip and wait for Start, the way a navigation app does
+      state.navigating = false;
+      panel.classList.remove('collapsed');
+      panel.classList.add('preview');
       setFollow(false);
       fitToRoute();
-      // Show the whole trip for a moment, then drop into the driving view
-      setTimeout(() => { if (state.nav && (state.position || state.sim)) setFollow(true); }, 2800);
     } else {
+      panel.classList.remove('preview');
       cameraFollow(false);
     }
   }
+
+  /** Begin guidance: follow the car, speak the first instruction, shrink the panel. */
+  function beginGuidance() {
+    if (!state.nav) return;
+    state.navigating = true;
+    const panel = $('routePanel');
+    panel.classList.remove('preview');
+    panel.classList.add('collapsed');
+    setFollow(true);
+    if (state.position) trackProgress();
+    updateBanner();
+    const first = state.nav.steps[1] || state.nav.steps[0];
+    if (first) speak(N.instruction(first, state.destination && state.destination.name));
+  }
+
+  $('startNav').onclick = beginGuidance;
+  $('cancelNav').onclick = () => endNavigation(false);
 
   function drawRoute() {
     const nav = state.nav;
@@ -487,6 +508,8 @@
 
   function endNavigation(arrived) {
     state.nav = null;
+    state.navigating = false;
+    $('routePanel').classList.remove('preview');
     state.progress = null;
     state.destination = null;
     stopSim();
@@ -679,9 +702,58 @@
   });
   $('clearSearch').onclick = () => { input.value = ''; closeSearch(); input.focus(); };
 
+  // "41.7151, 44.7930" — coordinates pasted straight in (Google's order: lat, lon)
+  const COORDS = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*[,;]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/;
+
+  /** A pasted map link or a pair of coordinates becomes a destination directly. */
+  async function useAsDestination(text) {
+    const coords = text.match(COORDS);
+    if (coords) {
+      const lat = Number(coords[1]);
+      const lon = Number(coords[2]);
+      if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        closeSearch(true);
+        await setDestination({ lon, lat, name: `${lat.toFixed(5)}, ${lon.toFixed(5)}` });
+        return true;
+      }
+    }
+
+    if (!/^https?:\/\//i.test(text)) return false;
+
+    results.hidden = true;
+    toast('Opening the shared link…');
+    try {
+      const res = await fetch(`/api/resolve?url=${encodeURIComponent(text)}`);
+      const data = await res.json();
+      if (!res.ok || !Number.isFinite(data.lat)) {
+        toast(data.error || 'No location found in that link');
+        return true;
+      }
+      const name = data.name || 'Shared place';
+      input.value = name;
+      $('clearSearch').hidden = false;
+      closeSearch(true);
+      await setDestination({ lon: data.lon, lat: data.lat, name });
+    } catch {
+      toast('Could not open that link');
+    }
+    return true;
+  }
+
+  input.addEventListener('paste', (e) => {
+    const text = (e.clipboardData && e.clipboardData.getData('text') || '').trim();
+    if (text && (COORDS.test(text) || /^https?:\/\//i.test(text))) {
+      e.preventDefault();
+      input.value = text;
+      $('clearSearch').hidden = false;
+      useAsDestination(text);
+    }
+  });
+
   async function runSearch() {
     const q = input.value.trim();
     if (q.length < 2) { results.hidden = true; return; }
+    if (await useAsDestination(q)) return;
     const seq = ++searchSeq;
     const c = state.position || { lon: map.getCenter().lng, lat: map.getCenter().lat };
     try {
@@ -852,7 +924,7 @@
       input.value = name;
       $('clearSearch').hidden = false;
       setDestination({ lon: to[0], lat: to[1], name }).then(() => {
-        if (qs.get('sim') === '1' && state.nav) { setFollow(true); startSim(); }
+        if (qs.get('sim') === '1' && state.nav) { beginGuidance(); startSim(); }
       });
     }
   }

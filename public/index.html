@@ -12,7 +12,7 @@
 
   <!-- Search -->
   <div class="card search" id="searchCard">
-    <input id="searchInput" type="search" placeholder="Search a place in Georgia…" autocomplete="off" />
+    <input id="searchInput" type="search" placeholder="Search, or paste a Google Maps link…" autocomplete="off" />
     <button class="icon-btn" id="clearSearch" title="Clear" hidden>✕</button>
     <ul id="searchResults" class="results" hidden></ul>
   </div>
@@ -62,8 +62,10 @@
     </div>
 
     <div class="route-actions">
-      <button class="btn" id="stepsToggle">Steps</button>
-      <button class="btn danger" id="endRoute">End</button>
+      <button class="btn primary preview-only" id="startNav">Start</button>
+      <button class="btn preview-only" id="cancelNav">Cancel</button>
+      <button class="btn drive-only" id="stepsToggle">Steps</button>
+      <button class="btn danger drive-only" id="endRoute">End</button>
     </div>
 
     <ol id="stepsList" class="steps" hidden></ol>
