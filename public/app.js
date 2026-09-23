@@ -465,18 +465,42 @@
     }
   }
 
-  /** Begin guidance: follow the car, speak the first instruction, shrink the panel. */
+  /** Begin guidance: swoop down to the car, then hand over to the driving camera. */
   function beginGuidance() {
     if (!state.nav) return;
     state.navigating = true;
     const panel = $('routePanel');
     panel.classList.remove('preview');
     panel.classList.add('collapsed');
-    setFollow(true);
+
     if (state.position) trackProgress();
     updateBanner();
     const first = state.nav.steps[1] || state.nav.steps[0];
     if (first) speak(N.instruction(first, state.destination && state.destination.name));
+
+    // Fly from the whole-trip overview down into the driving view
+    state.follow = false;
+    $('followBtn').classList.add('active');
+    const target = cameraTarget();
+    if (!target) { setFollow(true); return; }
+
+    map.flyTo({
+      center: [target.lon, target.lat],
+      zoom: target.zoom,
+      bearing: target.bearing,
+      pitch: target.pitch,
+      duration: LITE ? 900 : 1900,
+      curve: 1.5,   // dip out and back in, like a camera swooping down
+      essential: true,
+    });
+    map.once('moveend', () => {
+      // Hand the camera to the follow loop exactly where the flight ended
+      Object.assign(cam, {
+        lon: map.getCenter().lng, lat: map.getCenter().lat,
+        bearing: map.getBearing(), zoom: map.getZoom(), pitch: map.getPitch(),
+      });
+      state.follow = true;
+    });
   }
 
   $('startNav').onclick = beginGuidance;
@@ -868,6 +892,74 @@
     $('updatesBtn').classList.remove('active');
   };
 
+  // ---------------------------------------------------------------- send from phone
+  // The car shows a short code. The phone posts a place under that code at
+  // /send, and the car picks it up on its next check.
+  const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+  function carCode() {
+    let code = localGet('carCode');
+    if (!code || code.length !== 4) {
+      code = Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
+      localSet('carCode', code);
+    }
+    return code;
+  }
+
+  function showPairing() {
+    const code = carCode();
+    $('pairCode').textContent = code;
+    // A QR of the phone page, so you can just point a camera at the car screen
+    const img = $('pairQr');
+    if (window.qrcode && img) {
+      try {
+        const qr = window.qrcode(0, 'M');
+        qr.addData(`${location.origin}/send`);
+        qr.make();
+        img.src = qr.createDataURL(6, 8);
+        img.hidden = false;
+      } catch {
+        img.hidden = true;
+      }
+    }
+  }
+
+  async function checkInbox() {
+    try {
+      const res = await fetch(`/api/inbox?code=${carCode()}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (data.enabled === false) {
+        $('phoneStatus').textContent = 'Sending from a phone is not switched on yet.';
+        return;
+      }
+      if (data.place) {
+        const place = data.place;
+        $('phonePanel').hidden = true;
+        $('phoneBtn').classList.remove('active');
+        $('searchInput').value = place.name;
+        $('clearSearch').hidden = false;
+        toast(`From your phone: ${place.name}`);
+        setDestination({ lon: place.lon, lat: place.lat, name: place.name });
+      }
+    } catch { /* offline — try again on the next tick */ }
+  }
+
+  $('phoneBtn').onclick = () => {
+    const panel = $('phonePanel');
+    panel.hidden = !panel.hidden;
+    $('phoneBtn').classList.toggle('active', !panel.hidden);
+    if (!panel.hidden) showPairing();
+  };
+  $('closePhone').onclick = () => {
+    $('phonePanel').hidden = true;
+    $('phoneBtn').classList.remove('active');
+  };
+
+  // Check regularly, but not while the browser tab is in the background
+  setInterval(() => { if (!document.hidden) checkInbox(); }, 7000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkInbox(); });
+  checkInbox();
+
   // ---------------------------------------------------------------- theme
   $('themeBtn').onclick = () => {
     state.theme = state.theme === 'day' ? 'night' : 'day';
@@ -938,5 +1030,5 @@
   map.once('style.load', openDeepLink);
 
   // Handy for debugging from the browser console
-  window.geodrive = { map, state, startSim, stopSim };
+  window.geodrive = { map, state, startSim, stopSim, checkInbox, beginGuidance };
 })();

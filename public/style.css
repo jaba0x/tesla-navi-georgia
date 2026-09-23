@@ -85,6 +85,30 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .boot-error-title { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
 .boot-error-detail { color: var(--danger); word-break: break-word; margin-bottom: 10px; }
 
+/* Brand / credit badge */
+.brand {
+  position: absolute; left: 16px; top: 92px; z-index: 4;
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px; border-radius: 999px;
+  background: var(--bg); color: var(--muted); box-shadow: var(--shadow);
+  font-size: 13px; white-space: nowrap; pointer-events: none;
+}
+.brand svg { width: 20px; height: 20px; color: var(--accent); flex: none; }
+.brand b { color: var(--fg); font-weight: 700; }
+
+/* Send-from-phone panel */
+.phone {
+  top: 16px; right: 96px; width: min(340px, calc(100vw - 112px)); padding: 16px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.phone header { display: flex; align-items: center; justify-content: space-between; }
+.phone h2 { margin: 0; font-size: 20px; }
+.paircode {
+  font-size: 44px; font-weight: 800; letter-spacing: 10px; text-align: center;
+  padding: 10px 0 6px; color: var(--accent);
+}
+#pairQr { align-self: center; width: 170px; height: 170px; border-radius: 10px; background: #fff; padding: 8px; image-rendering: pixelated; }
+
 /* Toast */
 .toast {
   position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);

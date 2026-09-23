@@ -31,6 +31,10 @@ export default {
           // /check.html pings this so the Worker log records what the car's browser supports
           console.log('probe', JSON.stringify(Object.fromEntries(url.searchParams)));
           return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } });
+        case '/api/send':
+          return await sendToCar(request, env);
+        case '/api/inbox':
+          return await readInbox(url, env);
         case '/api/resolve':
           return await resolveLink(url);
         case '/api/health':
@@ -112,6 +116,45 @@ function tileTouchesGeorgia(z, x, y) {
   const m = 0.5;
   return lon(x + 1) >= minLon - m && lon(x) <= maxLon + m &&
     lat(y) >= minLat - m && lat(y + 1) <= maxLat + m;
+}
+
+// Sending a destination from a phone to the car.
+// The car shows a short code; the phone posts a place under that code; the car
+// picks it up on its next check. Kept for 15 minutes, and deleted once read.
+const CODE_RE = /^[A-HJ-NP-Z2-9]{4,6}$/;
+
+async function sendToCar(request, env) {
+  if (request.method !== 'POST') throw httpError(405, 'POST only');
+  if (!env.INBOX) throw httpError(503, 'Sending to the car is not set up yet');
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    throw httpError(400, 'Expected JSON');
+  }
+  const code = String(body.code || '').toUpperCase();
+  const lat = Number(body.lat);
+  const lon = Number(body.lon);
+  if (!CODE_RE.test(code)) throw httpError(400, 'That car code does not look right');
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+    throw httpError(400, 'Bad coordinates');
+  }
+
+  const place = { lat, lon, name: String(body.name || 'Shared place').slice(0, 80), at: Date.now() };
+  await env.INBOX.put(`dest:${code}`, JSON.stringify(place), { expirationTtl: 900 });
+  return json({ ok: true });
+}
+
+async function readInbox(url, env) {
+  if (!env.INBOX) return json({ enabled: false });
+  const code = String(url.searchParams.get('code') || '').toUpperCase();
+  if (!CODE_RE.test(code)) throw httpError(400, 'Bad code');
+
+  const value = await env.INBOX.get(`dest:${code}`);
+  if (!value) return json({ enabled: true });
+  await env.INBOX.delete(`dest:${code}`);
+  return json({ enabled: true, place: JSON.parse(value) });
 }
 
 // GET /api/resolve?url=... — turn a shared map link into coordinates.

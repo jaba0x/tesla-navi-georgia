@@ -4,11 +4,11 @@ A big-screen web map for drivers in Georgia 🇬🇪, made to work well in a car
 
 - Live GPS position with follow mode
 - Place search limited to Georgia
-- Turn-by-turn navigation: chase camera that tilts, turns and zooms in for each turn, maneuver arrows, a "then" preview of the turn after next, live distance, ETA and progress, spoken instructions, automatic re-routing
+- Turn-by-turn route with ETA, step list and automatic re-routing
 - Road updates layer (closures, works, hazards, EV chargers) from `public/updates.json`
 - Day / night map
 
-Not affiliated with Tesla, Inc.
+© 2026 Jaba Macharashvili. Not affiliated with Tesla, Inc.
 
 ## Stack
 
@@ -33,8 +33,7 @@ The public OSRM and Photon servers are free but rate-limited and meant for light
 ## Project layout
 
 ```
-public/          static site (index.html, app.js, nav.js, style.css, updates.json)
-                 nav.js holds the route geometry, wording and maneuver arrows
+public/          static site (index.html, app.js, style.css, updates.json)
 src/worker.js    Cloudflare Worker: /api/route, /api/search, /api/health
 wrangler.jsonc   Worker config
 ```
@@ -50,11 +49,6 @@ npm run dev        # http://localhost:8787
 
 Connected to Cloudflare Workers Builds: every push to `main` deploys automatically.
 Manual deploy: `npm run deploy`.
-
-## Demo drive
-
-Add `&sim=1` to a destination link to drive the route automatically, without GPS:
-`/?to=44.8010,41.7250&name=Rike%20Park&sim=1`
 
 ## Publishing road updates
 

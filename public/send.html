@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#111418">
+<meta name="author" content="Jaba Macharashvili">
+<title>Send to car — GeoDrive</title>
+<style>
+  :root { --bg:#12161a; --card:#1b1f24; --fg:#eef1f4; --muted:#9aa5b1; --line:#2d333b; --accent:#4c9aff; }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; min-height:100vh; background:var(--bg); color:var(--fg);
+    font-family:-apple-system, system-ui, "Segoe UI", Roboto, sans-serif;
+    display:flex; flex-direction:column; align-items:center; padding:24px 18px 40px;
+  }
+  .wrap { width:100%; max-width:440px; }
+  h1 { font-size:24px; margin:8px 0 4px; display:flex; align-items:center; gap:10px; }
+  h1 svg { width:30px; height:30px; color:var(--accent); }
+  p.lead { color:var(--muted); margin:0 0 22px; line-height:1.45; }
+  label { display:block; font-size:14px; color:var(--muted); margin:18px 0 6px; }
+  input {
+    width:100%; height:56px; padding:0 16px; font-size:17px;
+    background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:14px; outline:none;
+  }
+  input:focus { border-color:var(--accent); }
+  #code { letter-spacing:6px; text-transform:uppercase; font-weight:700; font-size:24px; text-align:center; }
+  button {
+    width:100%; height:60px; margin-top:22px; font-size:19px; font-weight:700;
+    background:var(--accent); color:#06121f; border:0; border-radius:14px;
+  }
+  button:disabled { opacity:0.5; }
+  .status { margin-top:18px; padding:14px 16px; border-radius:12px; font-size:16px; display:none; }
+  .status.ok { display:block; background:#10331d; color:#5fd37e; }
+  .status.err { display:block; background:#3a1b1e; color:#ff8b8b; }
+  .how { margin-top:34px; padding-top:18px; border-top:1px solid var(--line); color:var(--muted); font-size:15px; line-height:1.6; }
+  .how ol { padding-left:20px; margin:8px 0 0; }
+  footer { margin-top:30px; color:var(--muted); font-size:13px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 13l2-5a3 3 0 0 1 2.8-2h8.4A3 3 0 0 1 19 8l2 5v5a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1v-1H7v1a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/>
+      <path d="M3 13h18M7 16.5h.01M17 16.5h.01"/>
+    </svg>
+    Send to car
+  </h1>
+  <p class="lead">Paste a Google Maps link (or coordinates) and it appears on the car screen, ready to drive.</p>
+
+  <label for="place">Google Maps link or coordinates</label>
+  <input id="place" type="text" inputmode="url" placeholder="https://maps.app.goo.gl/… or 41.7151, 44.7930" autocomplete="off">
+
+  <label for="code">Car code (shown on the car screen)</label>
+  <input id="code" maxlength="6" placeholder="ABCD" autocomplete="off" autocapitalize="characters">
+
+  <button id="send">Send to car</button>
+  <div class="status" id="status"></div>
+
+  <div class="how">
+    On the car screen, tap the phone button to see its code.
+    <ol>
+      <li>In Google Maps: Share → Copy link</li>
+      <li>Paste it above and tap Send</li>
+      <li>The car shows the route — press Start</li>
+    </ol>
+  </div>
+
+  <footer>GeoDrive · © 2026 Jaba Macharashvili</footer>
+</div>
+
+<script>
+(function () {
+  var placeEl = document.getElementById('place');
+  var codeEl = document.getElementById('code');
+  var btn = document.getElementById('send');
+  var statusEl = document.getElementById('status');
+  var COORDS = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*[,;]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/;
+
+  try { codeEl.value = localStorage.getItem('carCode') || ''; } catch (e) {}
+
+  function show(kind, text) {
+    statusEl.className = 'status ' + kind;
+    statusEl.textContent = text;
+  }
+
+  async function resolvePlace(text) {
+    var m = text.match(COORDS);
+    if (m) {
+      return { lat: Number(m[1]), lon: Number(m[2]), name: m[1] + ', ' + m[2] };
+    }
+    if (!/^https?:\/\//i.test(text)) throw new Error('Paste a map link or coordinates');
+    var res = await fetch('/api/resolve?url=' + encodeURIComponent(text));
+    var data = await res.json();
+    if (!res.ok || typeof data.lat !== 'number') throw new Error(data.error || 'Could not read that link');
+    return { lat: data.lat, lon: data.lon, name: data.name || 'Shared place' };
+  }
+
+  btn.onclick = async function () {
+    var text = placeEl.value.trim();
+    var code = codeEl.value.trim().toUpperCase();
+    if (!text) return show('err', 'Paste a link first');
+    if (code.length < 4) return show('err', 'Enter the code shown on the car screen');
+
+    btn.disabled = true;
+    show('ok', 'Sending…');
+    try {
+      var place = await resolvePlace(text);
+      var res = await fetch('/api/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code, lat: place.lat, lon: place.lon, name: place.name }),
+      });
+      var data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not send');
+      try { localStorage.setItem('carCode', code); } catch (e) {}
+      show('ok', 'Sent: ' + place.name + ' — check the car screen');
+      placeEl.value = '';
+    } catch (err) {
+      show('err', err.message || 'Something went wrong');
+    }
+    btn.disabled = false;
+  };
+
+  // If the phone shared straight into this page (/send?url=…), fill it in
+  var shared = new URLSearchParams(location.search).get('url') || new URLSearchParams(location.search).get('text');
+  if (shared) placeEl.value = shared;
+})();
+</script>
+</body>
+</html>
