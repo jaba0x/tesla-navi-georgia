@@ -11,5 +11,9 @@
     "binding": "ASSETS",
     "run_worker_first": ["/api/*"]
   },
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // Short-lived mailbox for places sent from a phone (see /api/send, /api/inbox)
+  "kv_namespaces": [
+    { "binding": "INBOX", "id": "405ab533a21b433f9091753bfa0ea753" }
+  ]
 }
