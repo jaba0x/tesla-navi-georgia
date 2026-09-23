@@ -1,67 +1,132 @@
-# GeoDrive — Georgia road map
+# TeslaNaviGeorgia
 
-A big-screen web map for drivers in Georgia 🇬🇪, made to work well in a car's built-in browser (e.g. Tesla) and on phones.
+A big-screen map and navigation app for driving in Georgia 🇬🇪, built to run in a car's
+built-in web browser and on phones. Tesla's own navigation has limited routing here, so
+this fills the gap: search, turn-by-turn directions, 3D terrain for the mountain roads,
+and destinations sent straight from a phone.
 
-- Live GPS position with follow mode
-- Place search limited to Georgia
-- Turn-by-turn route with ETA, step list and automatic re-routing
-- Road updates layer (closures, works, hazards, EV chargers) from `public/updates.json`
-- Day / night map
+Live at **[tesla.jaba.ge](https://tesla.jaba.ge)** · phone page at **[tesla.jaba.ge/send](https://tesla.jaba.ge/send)**
 
-© 2026 Jaba Macharashvili. Not affiliated with Tesla, Inc.
+© 2026 Jaba Macharashvili. A personal project for friends and family.
+Not affiliated with, endorsed by, or connected to Tesla, Inc.
 
-## Stack
+![The map](docs/map.jpg)
 
-| Part | Service |
+## What it does
+
+| | |
 | --- | --- |
-| Hosting | Cloudflare Workers (static assets + API) |
-| Map tiles | [OpenFreeMap](https://openfreemap.org) (OpenStreetMap data) |
-| Map library | [MapLibre GL JS](https://maplibre.org) |
-| Routing | [OSRM](https://project-osrm.org) public server, via `/api/route` |
-| Search | [Photon](https://photon.komoot.io), via `/api/search` |
-| Live traffic | [TomTom Traffic Flow](https://developer.tomtom.com) raster tiles, via `/api/traffic/flow/{z}/{x}/{y}.png` |
+| **Search** | Places across Georgia, or paste a Google Maps link or coordinates |
+| **Navigation** | Turn-by-turn with spoken directions, live ETA, automatic re-routing |
+| **3D** | Real terrain and 3D buildings; the camera tilts and turns as you drive |
+| **Send from phone** | Share a place from Google Maps on your phone and it appears in the car |
+| **Road updates** | Closures, road works, hazards and chargers you publish yourself |
+| **Old and new cars** | Detects the screen and loads a lighter version on older ones |
 
-### Live traffic setup
+## Using it in the car
 
-The Worker needs a TomTom API key in a secret called `TOMTOM_KEY`
-(Cloudflare dashboard → Workers → tesla → Settings → Variables and Secrets).
-For local dev, put `TOMTOM_KEY=...` in `.dev.vars` (git-ignored).
-Only tiles covering Georgia are fetched, and tiles are cached for 2 minutes, to stay inside the free tier.
+Open **tesla.jaba.ge** in the car browser and allow location access.
 
-The public OSRM and Photon servers are free but rate-limited and meant for light use. The Worker caches responses, and because the frontend only talks to `/api/*`, providers can be swapped later (OpenRouteService, GraphHopper, self-hosted Valhalla…) without touching the frontend.
+### 1. Pick a destination
 
-## Project layout
+Type a place in the search box, tap anywhere on the map, or send one from your phone.
+You get the whole route first, with distance and arrival time.
 
-```
-public/          static site (index.html, app.js, style.css, updates.json)
-src/worker.js    Cloudflare Worker: /api/route, /api/search, /api/health
-wrangler.jsonc   Worker config
-```
+![Route preview with the Start button](docs/route-preview.jpg)
 
-## Run locally
+### 2. Press Start
 
-```bash
-npm install
-npm run dev        # http://localhost:8787
-```
+The camera swoops down into the driving view. The panel shrinks to a single bar showing
+the next turn — tap it any time to see the trip details, the step list and the End button.
 
-## Deploy
+![Driving view](docs/navigation.jpg)
 
-Connected to Cloudflare Workers Builds: every push to `main` deploys automatically.
-Manual deploy: `npm run deploy`.
+### 3. Sending a place from Google Maps
+
+Tap the 📱 button in the car. It shows a 4-letter code and a QR code.
+
+![The pairing code on the car screen](docs/send-to-car.jpg)
+
+On your phone:
+
+1. In Google Maps, open the place → **Share** → **Copy link**
+2. Scan the QR code, or open **tesla.jaba.ge/send**
+3. Paste the link, type the car's code, tap **Send to car**
+
+![The phone page](docs/phone-page.jpg)
+
+The car picks it up within a few seconds and shows the route, ready for Start. Your phone
+remembers the code, so next time you only paste and send. Apple Maps and Waze links work
+too, as do plain coordinates like `41.7151, 44.7930`.
+
+### Buttons on the right
+
+| | |
+| --- | --- |
+| ◎ | Follow my location (turns off when you drag the map) |
+| 3D | 3D view on/off |
+| 🔊 | Voice directions on/off |
+| 📱 | Show the code for sending places from a phone |
+| ⚠ | Road updates |
+| ◐ | Day / night map |
 
 ## Publishing road updates
 
-Edit `public/updates.json`, commit and push. Each item:
+Edit `public/updates.json`, commit and push — it is live a minute later. Each item:
 
 ```json
 {
   "id": "unique-id",
   "type": "closure | works | hazard | charger | info",
-  "title": "Short title",
-  "description": "Details",
-  "lat": 41.7, "lon": 44.8,
+  "title": "Jvari Pass closed",
+  "description": "Snow, closed until morning",
+  "lat": 42.5096, "lon": 44.4637,
   "source": "Where the info came from",
-  "updated": "2026-09-22"
+  "updated": "2026-09-23"
 }
 ```
+
+The entries shipped today are samples, marked SAMPLE on the map.
+
+## How it is built
+
+| Part | Service |
+| --- | --- |
+| Hosting | Cloudflare Workers (static site + API), auto-deployed from `main` |
+| Map | [MapLibre GL JS](https://maplibre.org) with [OpenFreeMap](https://openfreemap.org) tiles (OpenStreetMap data) |
+| Routing | [OSRM](https://project-osrm.org) public server, via `/api/route` |
+| Search | [Photon](https://photon.komoot.io), limited to Georgia, via `/api/search` |
+| 3D terrain | Mapzen elevation tiles on AWS Open Data, via `/api/dem` |
+| Phone → car | Cloudflare D1, via `/api/send` and `/api/inbox` |
+
+```
+public/     index.html, app.js (map + navigation), nav.js (route maths, arrows),
+            boot.js (picks the map engine), send.html (phone page), check.html,
+            style.css, updates.json
+src/        worker.js — the API and the link resolver
+docs/       screenshots for this file
+```
+
+Shared map links are resolved server-side (`/api/resolve`) because short links have to be
+followed, and only Google, Apple and Waze hosts are allowed.
+
+## Old car screens
+
+A 2018 Model 3 has no WebGL 2, which the current map engine needs, so `boot.js` checks the
+browser and loads an older engine plus a lighter mode: no terrain, no 3D buildings, slower
+camera. Everything else works the same. If a car still cannot start the map, it says so on
+screen, and **tesla.jaba.ge/check.html** lists exactly what that browser supports.
+
+## Running it yourself
+
+```bash
+npm install
+npm run dev        # http://localhost:8787
+npm run deploy     # or just push to main
+```
+
+Handy while developing:
+
+- `?sim=1` with a destination drives the route by itself — `/?to=44.8010,41.7250&name=Rike%20Park&sim=1`
+- `?gl1` forces the old-screen version on any browser
+- `window.geodrive` in the console exposes the map and state
