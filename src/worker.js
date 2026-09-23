@@ -141,8 +141,16 @@ async function sendToCar(request, env) {
     throw httpError(400, 'Bad coordinates');
   }
 
-  const place = { lat, lon, name: String(body.name || 'Shared place').slice(0, 80), at: Date.now() };
-  await env.INBOX.put(`dest:${code}`, JSON.stringify(place), { expirationTtl: 900 });
+  const name = String(body.name || 'Shared place').slice(0, 80);
+  const now = Date.now();
+
+  await ensureInbox(env);
+  await env.INBOX.batch([
+    env.INBOX.prepare('INSERT OR REPLACE INTO inbox (code, lat, lon, name, at) VALUES (?, ?, ?, ?, ?)')
+      .bind(code, lat, lon, name, now),
+    // anything older than 15 minutes was never collected
+    env.INBOX.prepare('DELETE FROM inbox WHERE at < ?').bind(now - 15 * 60 * 1000),
+  ]);
   return json({ ok: true });
 }
 
@@ -151,10 +159,24 @@ async function readInbox(url, env) {
   const code = String(url.searchParams.get('code') || '').toUpperCase();
   if (!CODE_RE.test(code)) throw httpError(400, 'Bad code');
 
-  const value = await env.INBOX.get(`dest:${code}`);
-  if (!value) return json({ enabled: true });
-  await env.INBOX.delete(`dest:${code}`);
-  return json({ enabled: true, place: JSON.parse(value) });
+  await ensureInbox(env);
+  const row = await env.INBOX.prepare(
+    'SELECT lat, lon, name, at FROM inbox WHERE code = ? AND at > ?',
+  ).bind(code, Date.now() - 15 * 60 * 1000).first();
+
+  if (!row) return json({ enabled: true });
+  // Read once: the car has it now
+  await env.INBOX.prepare('DELETE FROM inbox WHERE code = ?').bind(code).run();
+  return json({ enabled: true, place: row });
+}
+
+let inboxReady = false;
+async function ensureInbox(env) {
+  if (inboxReady) return;
+  await env.INBOX.prepare(
+    'CREATE TABLE IF NOT EXISTS inbox (code TEXT PRIMARY KEY, lat REAL, lon REAL, name TEXT, at INTEGER)',
+  ).run();
+  inboxReady = true;
 }
 
 // GET /api/resolve?url=... — turn a shared map link into coordinates.

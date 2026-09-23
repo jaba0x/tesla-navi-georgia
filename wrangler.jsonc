@@ -12,8 +12,10 @@
     "run_worker_first": ["/api/*"]
   },
   "observability": { "enabled": true },
-  // Short-lived mailbox for places sent from a phone (see /api/send, /api/inbox)
-  "kv_namespaces": [
-    { "binding": "INBOX", "id": "405ab533a21b433f9091753bfa0ea753" }
+  // Short-lived mailbox for places sent from a phone (see /api/send, /api/inbox).
+  // A database rather than KV: a place sent from a phone must be readable by the
+  // car within seconds, and KV reads can lag a write by up to a minute.
+  "d1_databases": [
+    { "binding": "INBOX", "database_name": "geodrive-inbox", "database_id": "820fc301-e948-43d1-aa7a-7e6b3c56799d" }
   ]
 }
