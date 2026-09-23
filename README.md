@@ -2,13 +2,13 @@
 
 A big-screen map and navigation app for driving in Georgia 🇬🇪, built to run in a car's
 built-in web browser and on phones. Tesla's own navigation has limited routing here, so
-this fills the gap: search, turn-by-turn directions, 3D terrain for the mountain roads,
-and destinations sent straight from a phone.
+this fills the gap with search, turn-by-turn directions, 3D terrain for the mountain
+roads, and destinations sent straight from a phone.
 
-Live at **[tesla.jaba.ge](https://tesla.jaba.ge)** · phone page at **[tesla.jaba.ge/send](https://tesla.jaba.ge/send)**
+Live at **[tesla.jaba.ge](https://tesla.jaba.ge)**, phone page at **[tesla.jaba.ge/send](https://tesla.jaba.ge/send)**
 
-© 2026 Jaba Macharashvili. A personal project for friends and family.
-Not affiliated with, endorsed by, or connected to Tesla, Inc.
+© 2026 Jaba Macharashvili. A personal project.
+Not affiliated with or endorsed by Tesla, Inc.
 
 ![The map](docs/map.jpg)
 
@@ -37,7 +37,7 @@ You get the whole route first, with distance and arrival time.
 ### 2. Press Start
 
 The camera swoops down into the driving view. The panel shrinks to a single bar showing
-the next turn — tap it any time to see the trip details, the step list and the End button.
+the next turn. Tap it any time to see the trip details, the step list and the End button.
 
 ![Driving view](docs/navigation.jpg)
 
@@ -72,7 +72,7 @@ too, as do plain coordinates like `41.7151, 44.7930`.
 
 ## Publishing road updates
 
-Edit `public/updates.json`, commit and push — it is live a minute later. Each item:
+Edit `public/updates.json`, commit and push, and it goes live a minute later. Each item:
 
 ```json
 {
@@ -103,19 +103,19 @@ The entries shipped today are samples, marked SAMPLE on the map.
 public/     index.html, app.js (map + navigation), nav.js (route maths, arrows),
             boot.js (picks the map engine), send.html (phone page), check.html,
             style.css, updates.json
-src/        worker.js — the API and the link resolver
+src/        worker.js, the API and the link resolver
 docs/       screenshots for this file
 ```
 
 Shared map links are resolved server-side (`/api/resolve`) because short links have to be
-followed, and only Google, Apple and Waze hosts are allowed.
+followed. Only Google, Apple and Waze hosts are allowed.
 
 ## Old car screens
 
 A 2018 Model 3 has no WebGL 2, which the current map engine needs, so `boot.js` checks the
-browser and loads an older engine plus a lighter mode: no terrain, no 3D buildings, slower
-camera. Everything else works the same. If a car still cannot start the map, it says so on
-screen, and **tesla.jaba.ge/check.html** lists exactly what that browser supports.
+browser and loads an older engine plus a lighter mode with no terrain, no 3D buildings and
+a slower camera. Everything else works the same. If a car still cannot start the map, it
+says so on screen, and **tesla.jaba.ge/check.html** lists what that browser supports.
 
 ## Running it yourself
 
@@ -127,6 +127,6 @@ npm run deploy     # or just push to main
 
 Handy while developing:
 
-- `?sim=1` with a destination drives the route by itself — `/?to=44.8010,41.7250&name=Rike%20Park&sim=1`
+- `?sim=1` with a destination drives the route by itself: `/?to=44.8010,41.7250&name=Rike%20Park&sim=1`
 - `?gl1` forces the old-screen version on any browser
 - `window.geodrive` in the console exposes the map and state
