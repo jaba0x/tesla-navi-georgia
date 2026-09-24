@@ -28,6 +28,10 @@
   const NAV_PITCH = 58;
   const CAR_OFFSET = 0.18; // how far below the middle of the screen the car sits
   const OFF_ROUTE_METERS = 45;
+  const ACCURACY_SLACK_MAX = 25;   // car GPS can claim 200 m of error; don't believe all of it
+  const OFF_ROUTE_FIXES = 2;       // fixes in a row before we accept that we left the route
+  const BACKSTEP_METERS = 25;      // smaller than this and it's jitter, not a correction
+  const STEP_PASSED_METERS = 10;   // hold the instruction until the turn is behind us
   const REROUTE_COOLDOWN_MS = 12000;
   const ARRIVE_METERS = 25;
   const SPEAK_AT = [800, 200, 45]; // metres before a turn
@@ -44,6 +48,7 @@
     navigating: false,  // false while previewing a route, true after Start
     progress: null,     // { traveled, stepIndex, toNext, remaining, eta }
     lastReroute: 0,
+    offRouteFixes: 0,
     spoken: new Set(),
     updates: [],
     sim: null,
@@ -425,8 +430,17 @@
       origin = { lon: c.lng, lat: c.lat };
       toast('No GPS yet — routing from the map center');
     }
+    // Which way the car is pointing, so a re-route starts down the road we are
+    // actually on instead of opening with a U-turn across the carriageway.
+    // Only a real GPS heading counts; the route-derived one still points along
+    // the route we have just left.
+    const p = state.position;
+    const heading = p && Number.isFinite(p.heading) && p.speed > 2 ? Math.round(p.heading) : null;
+
     try {
-      const res = await fetch(`/api/route?from=${origin.lon},${origin.lat}&to=${d.lon},${d.lat}`);
+      let q = `from=${origin.lon},${origin.lat}&to=${d.lon},${d.lat}`;
+      if (!preview && heading !== null) q += `&bearing=${(heading % 360 + 360) % 360}`;
+      const res = await fetch(`/api/route?${q}`);
       const data = await res.json();
       if (!res.ok || data.code !== 'Ok' || !data.routes?.length) {
         toast(data.error || data.message || 'No route found');
@@ -442,6 +456,7 @@
     state.nav = N.prepare(route);
     state.progress = null;
     state.spoken.clear();
+    state.offRouteFixes = 0;
     state.lastReroute = Date.now();
 
     drawRoute();
@@ -535,6 +550,7 @@
     state.navigating = false;
     $('routePanel').classList.remove('preview');
     state.progress = null;
+    state.offRouteFixes = 0;
     state.destination = null;
     stopSim();
     destMarker.remove();
@@ -562,20 +578,39 @@
     const prev = state.progress;
     const match = N.project(pos, nav.coords, nav.cum, prev ? prev.index : 0);
 
-    // Too far from the line? Ask for a new route
-    if (match.distance > OFF_ROUTE_METERS + (state.position.accuracy || 0)) {
-      if (Date.now() - state.lastReroute > REROUTE_COOLDOWN_MS) {
+    // Too far from the line? Ask for a new route.
+    // A car's browser often reports accuracy in the hundreds of metres, and
+    // adding all of that to the threshold meant leaving the route never
+    // registered at all, so the old line stayed on screen the whole way.
+    const slack = Math.min(state.position.accuracy || 0, ACCURACY_SLACK_MAX);
+    if (match.distance > OFF_ROUTE_METERS + slack) {
+      state.offRouteFixes++;
+      if (state.offRouteFixes >= OFF_ROUTE_FIXES &&
+          Date.now() - state.lastReroute > REROUTE_COOLDOWN_MS) {
         state.lastReroute = Date.now();
+        state.offRouteFixes = 0;
         toast('Re-routing…');
         speak('Re-routing');
         requestRoute(false);
       }
       return state.progress;
     }
+    state.offRouteFixes = 0;
 
-    const traveled = prev ? Math.max(prev.traveled, match.offset) : match.offset;
-    let stepIndex = prev ? prev.stepIndex : 0;
-    while (stepIndex + 1 < nav.steps.length && nav.offsets[stepIndex + 1] <= traveled + 8) stepIndex++;
+    // Move forward freely, backward only on a confident match. Pinning this to
+    // the highest value ever seen meant a single bad snap advanced the guidance
+    // for good, and it then called out turns from further down the route.
+    let traveled = match.offset;
+    if (prev && traveled < prev.traveled) {
+      const back = prev.traveled - traveled;
+      if (back < BACKSTEP_METERS || match.distance > 25) traveled = prev.traveled;
+    }
+
+    // Worked out from scratch each time so it can come back down after a
+    // correction, and held until the turn is actually behind us
+    let stepIndex = 0;
+    while (stepIndex + 1 < nav.steps.length &&
+           nav.offsets[stepIndex + 1] + STEP_PASSED_METERS <= traveled) stepIndex++;
 
     const toNext = Math.max(0, (nav.offsets[stepIndex + 1] ?? nav.total) - traveled);
     const remaining = Math.max(0, nav.total - traveled);
@@ -973,13 +1008,38 @@
   // and for showing someone what navigation looks like.
   function startSim() {
     stopSim();
-    let metres = 0;
+    // ?miss=1 drives straight past the first turn, so off-route detection and
+    // re-routing can be tried from a desk rather than from the driver's seat
+    const missAt = Number(new URLSearchParams(location.search).get('miss')) || 0;
+    let navRef = null, metres = 0, strayed = 0, missedAlready = false;
     const speed = 17; // m/s, about 60 km/h
+
     state.sim = setInterval(() => {
-      if (!state.nav) return stopSim();
-      metres = Math.min(metres + speed, state.nav.total);
-      const here = N.pointAt(state.nav, metres);
-      const ahead = N.pointAt(state.nav, metres + 25);
+      const nav = state.nav;
+      if (!nav) return stopSim();
+      if (navRef !== nav) { navRef = nav; metres = 0; strayed = 0; } // a re-route landed
+
+      const missOffset = missAt && !missedAlready ? nav.offsets[missAt] : null;
+      if (missOffset != null && metres >= missOffset) {
+        strayed += speed;
+        if (strayed > 400) missedAlready = true;
+        const from = N.pointAt(nav, Math.max(0, missOffset - 40));
+        const at = N.pointAt(nav, missOffset);
+        const brg = (N.bearing(from, at) * Math.PI) / 180;
+        const here = [
+          at[0] + (strayed * Math.sin(brg)) / (111320 * Math.cos((at[1] * Math.PI) / 180)),
+          at[1] + (strayed * Math.cos(brg)) / 110540,
+        ];
+        applyPosition({
+          lon: here[0], lat: here[1],
+          heading: N.bearing(at, here), speed, accuracy: 5,
+        });
+        return;
+      }
+
+      metres = Math.min(metres + speed, nav.total);
+      const here = N.pointAt(nav, metres);
+      const ahead = N.pointAt(nav, metres + 25);
       applyPosition({
         lon: here[0], lat: here[1],
         heading: N.bearing(here, ahead), speed, accuracy: 5,

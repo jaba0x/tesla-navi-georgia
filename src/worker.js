@@ -48,17 +48,35 @@ export default {
   },
 };
 
-// GET /api/route?from=lon,lat&to=lon,lat
+// GET /api/route?from=lon,lat&to=lon,lat&bearing=deg
 async function route(url, ctx) {
   const from = parseLonLat(url.searchParams.get('from'));
   const to = parseLonLat(url.searchParams.get('to'));
   if (!from || !to) throw httpError(400, 'from and to must be "lon,lat"');
 
   const coords = `${from.join(',')};${to.join(',')}`;
-  const upstream =
-    `${OSRM_URL}/${coords}?overview=full&geometries=geojson&steps=true&alternatives=false`;
+  const base = 'overview=full&geometries=geojson&steps=true&alternatives=false';
 
-  return cachedJson(ctx, `route/${coords}`, 300, upstream);
+  // With a heading, OSRM starts the route on a road running that way. Without
+  // one it takes the nearest edge whichever way it points, which on a re-route
+  // means the opposite carriageway and an opening U-turn.
+  const heading = Number(url.searchParams.get('bearing'));
+  if (Number.isFinite(heading) && heading >= 0 && heading < 360) {
+    const deg = Math.round(heading);
+    const bucket = Math.round(deg / 15) * 15; // coarse, so the cache still gets hits
+    try {
+      return await cachedJson(
+        ctx,
+        `route/${coords}/b${bucket}`,
+        300,
+        `${OSRM_URL}/${coords}?${base}&bearings=${deg},75;`,
+      );
+    } catch {
+      // No road nearby runs that way, so ask again without the constraint
+    }
+  }
+
+  return cachedJson(ctx, `route/${coords}`, 300, `${OSRM_URL}/${coords}?${base}`);
 }
 
 // GET /api/search?q=...&lat=..&lon=..

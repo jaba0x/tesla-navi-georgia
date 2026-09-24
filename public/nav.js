@@ -55,33 +55,48 @@ window.GeoNav = (() => {
    * on itself doesn't snap to the wrong pass.
    */
   function project(point, coords, cum, fromIndex = 0) {
-    const { kx, ky } = scale(point[1]);
-    const start = Math.max(0, fromIndex - 20);
-    let best = { distance: Infinity, offset: 0, index: start, point: coords[start] };
-
-    for (let i = start; i < coords.length - 1; i++) {
-      const ax = (coords[i][0] - point[0]) * kx, ay = (coords[i][1] - point[1]) * ky;
-      const bx = (coords[i + 1][0] - point[0]) * kx, by = (coords[i + 1][1] - point[1]) * ky;
-      const dx = bx - ax, dy = by - ay;
-      const len2 = dx * dx + dy * dy;
-      const t = len2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
-      const cx = ax + t * dx, cy = ay + t * dy;
-      const distance = Math.hypot(cx, cy);
-      if (distance < best.distance) {
-        best = {
-          distance,
-          index: i,
-          offset: cum[i] + t * (cum[i + 1] - cum[i]),
-          point: [
-            coords[i][0] + t * (coords[i + 1][0] - coords[i][0]),
-            coords[i][1] + t * (coords[i + 1][1] - coords[i][1]),
-          ],
-        };
-      }
-      // Once we are clearly past the match, stop looking
-      if (best.distance < 30 && cum[i] - best.offset > 400) break;
+    if (coords.length < 2) {
+      return { distance: 0, offset: 0, index: 0, point: coords[0] };
     }
-    return best;
+    const { kx, ky } = scale(point[1]);
+
+    function scan(start) {
+      let best = { distance: Infinity, offset: 0, index: start, point: coords[start] };
+      for (let i = start; i < coords.length - 1; i++) {
+        const ax = (coords[i][0] - point[0]) * kx, ay = (coords[i][1] - point[1]) * ky;
+        const bx = (coords[i + 1][0] - point[0]) * kx, by = (coords[i + 1][1] - point[1]) * ky;
+        const dx = bx - ax, dy = by - ay;
+        const len2 = dx * dx + dy * dy;
+        const t = len2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+        const cx = ax + t * dx, cy = ay + t * dy;
+        const distance = Math.hypot(cx, cy);
+        if (distance < best.distance) {
+          best = {
+            distance,
+            index: i,
+            offset: cum[i] + t * (cum[i + 1] - cum[i]),
+            point: [
+              coords[i][0] + t * (coords[i + 1][0] - coords[i][0]),
+              coords[i][1] + t * (coords[i + 1][1] - coords[i][1]),
+            ],
+          };
+        }
+        // Once we are clearly past the match, stop looking
+        if (best.distance < 30 && cum[i] - best.offset > 400) break;
+      }
+      return best;
+    }
+
+    const start = Math.max(0, fromIndex - 40);
+    const near = scan(start);
+    // Nothing close on the road ahead. Look at the whole route before giving up,
+    // otherwise one bad match pins guidance to the wrong part of the line and it
+    // never finds its way back.
+    if (near.distance > 60 && start > 0) {
+      const all = scan(0);
+      if (all.distance < near.distance) return all;
+    }
+    return near;
   }
 
   /** The position `metres` further along the route, for aiming the camera. */
