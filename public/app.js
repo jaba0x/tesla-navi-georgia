@@ -366,9 +366,14 @@
   }
 
   // How far ahead of the car to aim, so the car sits in the lower part of the
-  // screen and most of the view is the road to come.
+  // screen and most of the view is the road to come. Worked out from the screen
+  // height rather than a fixed number of metres: on the tall portrait screen in
+  // a Model S a fixed distance left the car stranded in the middle with half the
+  // display showing road already driven.
   function lookAhead(zoom) {
-    return Math.min(260, 40 * 2 ** (18 - zoom));
+    const lat = state.position ? state.position.lat : map.getCenter().lat;
+    const metresPerPixel = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
+    return Math.max(60, Math.min(340, CAR_OFFSET * innerHeight * metresPerPixel));
   }
 
   function cameraTarget() {
@@ -596,8 +601,13 @@
     const b = new maplibregl.LngLatBounds();
     state.nav.coords.forEach((c) => b.extend(c));
     const panel = $('routePanel').getBoundingClientRect();
+    // In portrait the panel spans the bottom, so the room to leave is below the
+    // route rather than beside it
+    const portrait = innerHeight > innerWidth;
     map.fitBounds(b, {
-      padding: { top: 100, bottom: 60, right: 100, left: innerWidth > 900 ? panel.width + 40 : 40 },
+      padding: portrait
+        ? { top: 180, bottom: panel.height + 40, left: 40, right: 110 }
+        : { top: 100, bottom: 60, right: 100, left: innerWidth > 900 ? panel.width + 40 : 40 },
       maxZoom: 16, pitch: 0, bearing: 0,
     });
   }

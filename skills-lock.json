@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "fusion360-mcp": {
+      "source": "rahayesj/claudefusion360mcp",
+      "sourceType": "github",
+      "skillPath": "docs/SKILL.md",
+      "computedHash": "7547f9ae114da66dba14351499cf46d14b7b973734f98d2937d8a53b5b6d253a"
+    }
+  }
+}
