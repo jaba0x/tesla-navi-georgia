@@ -86,7 +86,7 @@ Edit `public/updates.json`, commit and push, and it goes live a minute later. Ea
 }
 ```
 
-The entries shipped today are samples, marked SAMPLE on the map.
+The list ships empty. Add an entry and it shows on the map and in the ⚠ panel.
 
 ## How it is built
 
