@@ -26,6 +26,11 @@
     <button class="round-btn" id="phoneBtn" title="Send a place from your phone">📱</button>
     <button class="round-btn" id="updatesBtn" title="Road updates">⚠</button>
     <button class="round-btn" id="themeBtn" title="Day / night map">◐</button>
+    <button class="round-btn brandmark" id="accountBtn" title="Account and saved places">
+      <svg viewBox="0 0 40 40" aria-hidden="true">
+        <path d="M23.5 6.5 12.5 22.5h6.2L16.5 33.5l11.2-16.3h-6.4z" fill="currentColor"/>
+      </svg>
+    </button>
   </div>
 
   <!-- Shown when the page cannot start, instead of a blank map -->
@@ -59,6 +64,32 @@
     <p class="muted small" id="phoneStatus">Waiting for a place from your phone…</p>
   </aside>
 
+  <!-- Account and saved places -->
+  <aside class="card account" id="accountPanel" hidden>
+    <header>
+      <h2 id="accountTitle">Sign in</h2>
+      <button class="icon-btn" id="closeAccount" title="Close">✕</button>
+    </header>
+
+    <form class="login" id="loginForm">
+      <p class="muted small">Sign in to keep saved places across drives.</p>
+      <input id="loginUser" type="text" placeholder="Username" autocomplete="username"
+             autocapitalize="none" autocorrect="off" spellcheck="false" />
+      <input id="loginPass" type="password" placeholder="Password" autocomplete="current-password" />
+      <button class="btn primary" type="submit">Sign in</button>
+      <p class="muted small" id="loginStatus"></p>
+    </form>
+
+    <div id="accountBody" hidden>
+      <p class="muted small" id="whoami"></p>
+      <ul class="fav-list" id="favList"></ul>
+      <p class="muted small" id="favEmpty" hidden>
+        Nothing saved yet. Pick a destination and tap ☆ next to Start.
+      </p>
+      <button class="btn" id="logoutBtn">Sign out</button>
+    </div>
+  </aside>
+
   <!-- Status toast -->
   <div id="toast" class="toast" hidden></div>
 
@@ -89,6 +120,7 @@
 
     <div class="route-actions">
       <button class="btn primary preview-only" id="startNav">Start</button>
+      <button class="btn star preview-only" id="saveFav" title="Save this place" hidden>☆</button>
       <button class="btn preview-only" id="cancelNav">Cancel</button>
       <button class="btn drive-only" id="stepsToggle">Steps</button>
       <button class="btn danger drive-only" id="endRoute">End</button>

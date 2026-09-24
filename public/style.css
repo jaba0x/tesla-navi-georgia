@@ -74,6 +74,10 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 .round-btn.active { background: var(--accent); color: #fff; }
 #view3dBtn { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+/* The account button wears the project mark rather than a glyph */
+.round-btn.brandmark { color: #e31937; }
+.round-btn.brandmark svg { display: block; width: 30px; height: 30px; margin: 0 auto; }
+.round-btn.brandmark.active { color: #fff; }
 
 /* Start-up error */
 .boot-error {
@@ -110,6 +114,29 @@ button { font: inherit; color: inherit; cursor: pointer; }
   padding: 10px 0 6px; color: var(--accent);
 }
 #pairQr { align-self: center; width: 170px; height: 170px; border-radius: 10px; background: #fff; padding: 8px; image-rendering: pixelated; }
+
+/* Account and saved places */
+.account {
+  top: 16px; right: 96px; width: min(340px, calc(100vw - 112px)); padding: 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.account header { display: flex; align-items: center; justify-content: space-between; }
+.account h2 { margin: 0; font-size: 20px; }
+.login { display: flex; flex-direction: column; gap: 10px; margin: 0; }
+.login input {
+  height: 52px; padding: 0 14px; font-size: 17px;
+  background: transparent; color: var(--fg);
+  border: 1px solid var(--line); border-radius: 12px; outline: none;
+}
+.login input:focus { border-color: var(--accent); }
+.fav-list { list-style: none; margin: 0; padding: 0; max-height: 46vh; overflow: auto; }
+.fav-list li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 4px; border-bottom: 1px solid var(--line);
+}
+.fav-list .f-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.btn.star { flex: none; width: 58px; font-size: 22px; line-height: 1; }
+.btn.star.on { color: #fff; background: var(--accent); border-color: var(--accent); }
 
 /* Toast */
 .toast {
@@ -236,6 +263,7 @@ body.night .route-meta span:first-child { color: #3fb950; }
 
   .round-btn { width: 72px; height: 72px; font-size: 30px; }
   #view3dBtn { font-size: 22px; }
+  .round-btn.brandmark svg { width: 34px; height: 34px; }
 
   .route { left: 16px; right: 16px; width: auto; max-height: 46vh; padding: 18px; }
   .route.collapsed { width: auto; padding: 14px 18px; }
@@ -254,6 +282,8 @@ body.night .route-meta span:first-child { color: #3fb950; }
   .steps li { font-size: 18px; padding: 13px 4px; }
 
   .phone { left: 16px; right: 104px; width: auto; top: 96px; }
+  .account { left: 16px; right: 104px; width: auto; top: 96px; }
+  .login input { height: 60px; font-size: 19px; }
   #pairQr { width: 220px; height: 220px; }
   .paircode { font-size: 54px; }
   .updates { left: 16px; right: 104px; width: auto; top: 96px; bottom: 16px; }

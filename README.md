@@ -71,6 +71,35 @@ too, as do plain coordinates like `41.7151, 44.7930`.
 | 📱 | Show the code for sending places from a phone |
 | ⚠ | Road updates |
 | ◐ | Day / night map |
+| 👤 | Sign in, and your saved places |
+
+## Accounts and saved places
+
+Signing in keeps a list of places across drives. Pick a destination, tap ☆ next to
+Start, and it is there next time from the 👤 panel. The map itself needs no account.
+
+There is no sign-up page. Accounts are made from the command line, which is why the
+site has no registration surface to attack:
+
+```bash
+node tools/adduser.mjs jaba          # asks for a password, writes .adduser.sql
+npx wrangler d1 execute geodrive-inbox --remote --file=.adduser.sql
+rm .adduser.sql
+```
+
+The password is typed at the prompt and never written down. What lands in the
+database is a PBKDF2-SHA256 hash at 210,000 iterations with a per-account salt,
+which is what the Workers runtime offers; bcrypt and argon2 are not available
+there. Run the same command again for an existing name to change its password.
+
+Sessions are a random token in an `HttpOnly`, `Secure`, `SameSite=Lax` cookie that
+lasts 120 days, so a car does not ask on every drive. Only the SHA-256 of the token
+is stored, so a copy of the database hands out no live sessions. Eight failed
+attempts on a username buys a ten minute cool-off. To sign everyone out:
+
+```bash
+npx wrangler d1 execute geodrive-inbox --remote --command "DELETE FROM sessions"
+```
 
 ## Publishing road updates
 
@@ -100,12 +129,16 @@ The list ships empty. Add an entry and it shows on the map and in the ⚠ panel.
 | Search | [Photon](https://photon.komoot.io), limited to Georgia, via `/api/search` |
 | 3D terrain | Mapzen elevation tiles on AWS Open Data, via `/api/dem` |
 | Phone → car | Cloudflare D1, via `/api/send` and `/api/inbox` |
+| Accounts | Cloudflare D1, via `/api/login`, `/api/me` and `/api/favourites` |
 
 ```
 public/     index.html, app.js (map + navigation), nav.js (route maths, arrows),
             boot.js (picks the map engine), send.html (phone page), check.html,
             style.css, updates.json
-src/        worker.js, the API and the link resolver
+src/        worker.js (the API and the link resolver), accounts.js (sign-in,
+            sessions, saved places), http.js
+tools/      adduser.mjs, brand.js
+test/       nav.test.js, auth.test.js — plain `node test/<file>`, no dependencies
 docs/       screenshots for this file
 ```
 

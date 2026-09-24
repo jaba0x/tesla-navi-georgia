@@ -56,6 +56,8 @@
     rerouteGaveUp: false,
     spoken: new Set(),
     updates: [],
+    user: null,       // signed-in username, or null
+    favs: [],         // saved places for that user
     sim: null,
   };
 
@@ -497,6 +499,7 @@
     state.destination = dest;
     destMarker.setLngLat([dest.lon, dest.lat]).addTo(map);
     await requestRoute(true);
+    updateStar();
   }
 
   async function requestRoute(preview) {
@@ -1108,6 +1111,158 @@
     document.body.classList.toggle('night', state.theme === 'night');
     map.setStyle(STYLES[state.theme]); // overlays are re-added on style.load
   };
+
+
+  // ---------------------------------------------------------------- account
+  // Sign in to keep saved places. The session rides in an HttpOnly cookie, so
+  // the car stays signed in between drives and the token never reaches this file.
+  async function api(path, options) {
+    const res = await fetch(path, options);
+    let data = {};
+    try { data = await res.json(); } catch { /* no body */ }
+    if (!res.ok) throw new Error(data.error || 'Something went wrong');
+    return data;
+  }
+
+  function savedMatch() {
+    const d = state.destination;
+    if (!d) return null;
+    return state.favs.find(
+      (f) => Math.abs(f.lat - d.lat) < 0.0005 && Math.abs(f.lon - d.lon) < 0.0005,
+    ) || null;
+  }
+
+  function updateStar() {
+    const btn = $('saveFav');
+    if (!btn) return;
+    btn.hidden = !state.user;
+    const hit = savedMatch();
+    btn.textContent = hit ? '\u2605' : '\u2606';
+    btn.classList.toggle('on', Boolean(hit));
+  }
+
+  function renderFavs() {
+    const list = $('favList');
+    list.innerHTML = '';
+    state.favs.forEach((f) => {
+      const li = document.createElement('li');
+      li.innerHTML = '<span class="f-name"></span><button class="icon-btn" title="Remove">\u2715</button>';
+      li.querySelector('.f-name').textContent = f.name;
+      li.querySelector('.f-name').onclick = () => {
+        $('accountPanel').hidden = true;
+        $('accountBtn').classList.toggle('active', Boolean(state.user));
+        setDestination({ lat: f.lat, lon: f.lon, name: f.name });
+      };
+      li.querySelector('button').onclick = () => removeFav(f.id);
+      list.appendChild(li);
+    });
+    $('favEmpty').hidden = state.favs.length > 0;
+  }
+
+  function renderAccount() {
+    const signedIn = Boolean(state.user);
+    $('accountTitle').textContent = signedIn ? 'Saved places' : 'Sign in';
+    $('loginForm').hidden = signedIn;
+    $('accountBody').hidden = !signedIn;
+    if (signedIn) $('whoami').textContent = 'Signed in as ' + state.user;
+    renderFavs();
+    updateStar();
+  }
+
+  async function removeFav(id) {
+    try {
+      await api('/api/favourites?id=' + id, { method: 'DELETE' });
+      state.favs = state.favs.filter((f) => f.id !== id);
+      renderFavs();
+      updateStar();
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  async function loadFavs() {
+    if (!state.user) { state.favs = []; return; }
+    try {
+      state.favs = (await api('/api/favourites')).items || [];
+    } catch {
+      state.favs = [];
+    }
+  }
+
+  async function loadMe() {
+    try {
+      state.user = (await api('/api/me')).username || null;
+    } catch {
+      state.user = null;   // accounts not set up, or offline; the map still works
+    }
+    await loadFavs();
+    renderAccount();
+  }
+
+  $('accountBtn').onclick = () => {
+    const panel = $('accountPanel');
+    panel.hidden = !panel.hidden;
+    $('accountBtn').classList.toggle('active', !panel.hidden);
+    if (!panel.hidden) {
+      renderAccount();
+      if (!state.user) $('loginUser').focus();
+    }
+  };
+  $('closeAccount').onclick = () => {
+    $('accountPanel').hidden = true;
+    $('accountBtn').classList.remove('active');
+  };
+
+  $('loginForm').onsubmit = async (event) => {
+    event.preventDefault();
+    const status = $('loginStatus');
+    status.textContent = 'Signing in\u2026';
+    try {
+      const data = await api('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: $('loginUser').value, password: $('loginPass').value }),
+      });
+      state.user = data.username;
+      $('loginPass').value = '';
+      status.textContent = '';
+      await loadFavs();
+      renderAccount();
+      toast('Signed in as ' + state.user);
+    } catch (err) {
+      status.textContent = err.message;
+    }
+  };
+
+  $('logoutBtn').onclick = async () => {
+    try { await api('/api/logout', { method: 'POST' }); } catch { /* going anyway */ }
+    state.user = null;
+    state.favs = [];
+    renderAccount();
+    toast('Signed out');
+  };
+
+  $('saveFav').onclick = async () => {
+    const d = state.destination;
+    if (!d || !state.user) return;
+    const hit = savedMatch();
+    if (hit) return removeFav(hit.id);
+    try {
+      const saved = await api('/api/favourites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: d.name, lat: d.lat, lon: d.lon }),
+      });
+      if (!state.favs.some((f) => f.id === saved.id)) state.favs.unshift(saved);
+      renderFavs();
+      updateStar();
+      toast('Saved');
+    } catch (err) {
+      toast(err.message);
+    }
+  };
+
+  loadMe();
 
   // ---------------------------------------------------------------- demo drive
   // /?sim=1 drives the route by itself — useful for testing without GPS,

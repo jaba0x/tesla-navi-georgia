@@ -2,6 +2,9 @@
 // Serves the static site from /public and proxies routing + search APIs
 // so we can cache responses and swap providers later without touching the frontend.
 
+import { httpError, json } from './http.js';
+import { favourites, login, logout, me } from './accounts.js';
+
 const UA = 'GeoDrive/0.1 (+https://github.com/jaba0x/georgia-drive-map)';
 
 // Georgia bounding box: minLon, minLat, maxLon, maxLat
@@ -35,6 +38,14 @@ export default {
           return await sendToCar(request, env);
         case '/api/inbox':
           return await readInbox(url, env);
+        case '/api/login':
+          return await login(request, env);
+        case '/api/logout':
+          return await logout(request, env);
+        case '/api/me':
+          return await me(request, env);
+        case '/api/favourites':
+          return await favourites(request, env, url);
         case '/api/resolve':
           return await resolveLink(url);
         case '/api/health':
@@ -310,15 +321,4 @@ function parseLonLat(value) {
   return [lon.toFixed(5), lat.toFixed(5)];
 }
 
-function httpError(status, message) {
-  const err = new Error(message);
-  err.status = status;
-  return err;
-}
 
-function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
-  });
-}
