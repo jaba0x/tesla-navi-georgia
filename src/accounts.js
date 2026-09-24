@@ -10,7 +10,11 @@ import { httpError, json } from './http.js';
 
 const COOKIE = 'geo_session';
 const SESSION_DAYS = 120;          // a car should not ask you to sign in every drive
-const PBKDF2_ITERATIONS = 210000;  // OWASP guidance for PBKDF2-SHA256
+// The Workers runtime refuses anything above 100,000 ("iteration counts above
+// 100000 are not supported"), so this is the ceiling rather than a choice. The
+// shortfall against OWASP guidance is covered by there being no public sign-up,
+// a ten character minimum on passwords and a lock-out after eight bad tries.
+const PBKDF2_ITERATIONS = 100000;
 const MAX_FAILURES = 8;
 const FAILURE_WINDOW_MS = 10 * 60 * 1000;
 const MAX_FAVOURITES = 60;
@@ -18,7 +22,7 @@ const MAX_FAVOURITES = 60;
 // A hash to compare against when the username does not exist, so a missing user
 // and a wrong password take about the same time to answer.
 const DUMMY =
-  'pbkdf2$210000$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+  'pbkdf2$100000$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
 
 const enc = new TextEncoder();
 let ready = false;

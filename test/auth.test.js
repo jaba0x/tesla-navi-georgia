@@ -18,7 +18,10 @@ function check(name, got, want) {
   const [scheme, iterations, salt, digest] = stored.split('$');
 
   check('stored as pbkdf2', scheme, 'pbkdf2');
-  check('iteration count is not quietly low', Number(iterations) >= 210000, true);
+  // Workers rejects anything higher, so this has to be exact rather than a floor.
+  // Node's WebCrypto has no such cap, which is why a local-only test once passed
+  // while the deployed login returned 502.
+  check('iterations sit at the Workers ceiling', Number(iterations), 100000);
   check('salt is 16 bytes', Buffer.from(salt, 'base64').length, 16);
   check('digest is 32 bytes', Buffer.from(digest, 'base64').length, 32);
 

@@ -88,9 +88,10 @@ rm .adduser.sql
 ```
 
 The password is typed at the prompt and never written down. What lands in the
-database is a PBKDF2-SHA256 hash at 210,000 iterations with a per-account salt,
-which is what the Workers runtime offers; bcrypt and argon2 are not available
-there. Run the same command again for an existing name to change its password.
+database is a PBKDF2-SHA256 hash with a per-account salt, at 100,000 iterations,
+which is the most the Workers runtime allows. Bcrypt and argon2 are not available
+there at all. The gap against current guidance is covered by there being no public
+sign-up, a ten character minimum and a lock-out after eight bad attempts. Run the same command again for an existing name to change its password.
 
 Sessions are a random token in an `HttpOnly`, `Secure`, `SameSite=Lax` cookie that
 lasts 120 days, so a car does not ask on every drive. Only the SHA-256 of the token
