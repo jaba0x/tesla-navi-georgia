@@ -212,6 +212,7 @@ body.night .route-meta span:first-child { color: #3fb950; }
 .me-car { display: block; width: 100%; height: 100%; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55)); }
 .car-body { fill: #e31937; stroke: #fff; stroke-width: 1.7; stroke-linejoin: round; }
 .car-roof { fill: #b30d27; }
+.car-badge { fill: #fff; }   /* the same bolt as the badge in the corner */
 .car-glass { fill: #0b0f14; opacity: 0.82; }
 .car-mirror { fill: #e31937; stroke: #fff; stroke-width: 1.2; stroke-linejoin: round; }
 /* Parked: dim it slightly so a moving car reads as the live one */
