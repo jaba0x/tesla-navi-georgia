@@ -1,3 +1,5 @@
+![TeslaNaviGeorgia](docs/brand/patreon-cover.png)
+
 # TeslaNaviGeorgia
 
 A big-screen map and navigation app for driving in Georgia 🇬🇪, built to run in a car's
