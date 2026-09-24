@@ -20,6 +20,8 @@ Not affiliated with or endorsed by Tesla, Inc.
 | --- | --- |
 | **Search** | Places across Georgia, or paste a Google Maps link or coordinates |
 | **Navigation** | Turn-by-turn with spoken directions, live ETA, automatic re-routing |
+| **Other ways** | Up to three routes side by side before you start; pick one with a tap |
+| **Speed** | The signed speed limit while you drive, and a warning with a chime before a speed camera |
 | **3D** | Real terrain and 3D buildings; the camera tilts and turns as you drive |
 | **Send from phone** | Share a place from Google Maps on your phone and it appears in the car |
 | **Road updates** | Closures, road works, hazards and chargers you publish yourself |
@@ -32,7 +34,9 @@ Open **tesla.jaba.ge** in the car browser and allow location access.
 ### 1. Pick a destination
 
 Type a place in the search box, tap anywhere on the map, or send one from your phone.
-You get the whole route first, with distance and arrival time.
+A tap on the map names what is there, a place or an address, with a **Drive here** button.
+You get the whole route first, with distance and arrival time. When there are other ways
+there, they show in grey with their times, and as buttons under the route: tap one to take it.
 
 ![Route preview with the Start button](docs/route-preview.jpg)
 
@@ -40,6 +44,11 @@ You get the whole route first, with distance and arrival time.
 
 The camera swoops down into the driving view. The panel shrinks to a single bar showing
 the next turn. Tap it any time to see the trip details, the step list and the End button.
+
+Under the search box, a sign shows the speed limit wherever OpenStreetMap has it; it turns
+red when you are more than 5 km/h over. About 400 m before a speed camera (more at
+motorway speeds) a warning shows the camera's limit and the distance, with a short chime
+when voice is on. It also works without a route, for a camera on the road straight ahead.
 
 ![Driving view](docs/navigation.jpg)
 
@@ -96,16 +105,19 @@ The list ships empty. Add an entry and it shows on the map and in the ⚠ panel.
 | --- | --- |
 | Hosting | Cloudflare Workers (static site + API), auto-deployed from `main` |
 | Map | [MapLibre GL JS](https://maplibre.org) with [OpenFreeMap](https://openfreemap.org) tiles (OpenStreetMap data) |
-| Routing | [OSRM](https://project-osrm.org) public server, via `/api/route` |
-| Search | [Photon](https://photon.komoot.io), limited to Georgia, via `/api/search` |
+| Routing | [OSRM](https://project-osrm.org) public server, with alternatives, via `/api/route` |
+| Speed limits | OpenStreetMap limits, matched to the route by [Valhalla](https://valhalla.github.io/valhalla/) on FOSSGIS's public server, via `/api/limits` |
+| Speed cameras | OpenStreetMap, via [Overpass](https://overpass-api.de); `/api/cameras` answers from a copy renewed daily, or the one in `public/cameras.json` |
+| Search | [Photon](https://photon.komoot.io), limited to Georgia, via `/api/search`; what is at a tapped spot via `/api/reverse` |
 | 3D terrain | Mapzen elevation tiles on AWS Open Data, via `/api/dem` |
 | Phone → car | Cloudflare D1, via `/api/send` and `/api/inbox` |
 
 ```
 public/     index.html, app.js (map + navigation), nav.js (route maths, arrows),
             boot.js (picks the map engine), send.html (phone page), check.html,
-            style.css, updates.json
-src/        worker.js, the API and the link resolver
+            style.css, updates.json, cameras.json, sw.js (offline copy)
+src/        worker.js, the API and the link resolver; cameras.mjs, the camera query
+scripts/    cameras.mjs, refreshes public/cameras.json (npm run cameras)
 docs/       screenshots for this file
 ```
 
@@ -127,6 +139,7 @@ says so on screen, and **tesla.jaba.ge/check.html** lists what that browser supp
 npm install
 npm run dev        # http://localhost:8787
 npm run deploy     # or just push to main
+npm run cameras    # refresh the speed camera list shipped with the site
 ```
 
 Handy while developing:

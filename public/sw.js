@@ -7,7 +7,9 @@
  * - the map library: its files are versioned by path, so they are kept for good.
  * - map pieces (vector tiles, label fonts, sprites, 3D elevation) are kept as they
  *   are fetched, up to a limit, oldest out first.
- * Routes, search and the phone inbox always go to the network.
+ * - the road updates and the speed camera list: fresh when online, the last copy
+ *   when not.
+ * Routes, speed limits, search and the phone inbox always go to the network.
  */
 'use strict';
 
@@ -67,8 +69,10 @@ self.addEventListener('fetch', (event) => {
     if (APP_FILES.includes(url.pathname)) return event.respondWith(fromApp(url.pathname, req));
     if (url.pathname.startsWith('/vendor/')) return event.respondWith(cacheFirst(event, LIB_CACHE));
     if (url.pathname.startsWith('/api/dem/')) return event.respondWith(cacheFirst(event, MAP_CACHE));
-    if (url.pathname === '/updates.json') return event.respondWith(networkFirst(event, DATA_CACHE));
-    return;   // routes, search, the inbox: straight to the network
+    if (url.pathname === '/updates.json' || url.pathname === '/api/cameras') {
+      return event.respondWith(networkFirst(event, DATA_CACHE));
+    }
+    return;   // routes, speed limits, search, the inbox: straight to the network
   }
 
   if (url.hostname === 'tiles.openfreemap.org') {

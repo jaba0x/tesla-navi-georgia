@@ -261,6 +261,54 @@ body.night .route-meta span:first-child { color: #3fb950; }
 .steps .s-text { overflow: hidden; }
 .steps .s-dist { margin-left: auto; color: var(--muted); white-space: nowrap; }
 
+/* Other ways there, side by side before Start; the chosen one is lit */
+.alts { gap: 8px; margin: 0 0 12px; }
+.route.preview .alts { display: flex; }
+.alt {
+  flex: 1 1 0; min-width: 0; padding: 8px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: transparent; text-align: left;
+  display: flex; flex-direction: column; gap: 2px;
+  transition: transform 160ms var(--ease-out), background-color 150ms ease, border-color 150ms ease;
+}
+.alt b { font-size: 17px; white-space: nowrap; }
+.alt-sub { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alt.selected { border-color: var(--accent); background: var(--accent-soft); }
+.alt:active { transform: scale(0.97); }
+
+/* While driving, under the search box: the speed limit sign, and the camera
+   warning beside it. Neither takes taps, so the map stays draggable there. */
+.drive-info {
+  position: absolute; top: 92px; left: 16px; z-index: 5;
+  display: flex; align-items: center; gap: 10px; pointer-events: none;
+}
+.limit-sign {
+  width: 58px; height: 58px; border-radius: 50%; border: 6px solid #d1242f;
+  background: #fff; color: #111; box-shadow: var(--shadow);
+  display: grid; place-items: center;
+  font-size: 22px; font-weight: 800; letter-spacing: -0.5px; line-height: 1;
+}
+/* More than 5 km/h over it */
+.limit-sign.over { background: #d1242f; color: #fff; border-color: #fff; }
+.cam-alert {
+  height: 52px; padding: 0 18px 0 14px; border-radius: 26px;
+  background: var(--bg); color: var(--fg); box-shadow: var(--shadow);
+  display: flex; align-items: center; gap: 10px;
+  font-size: 19px; font-weight: 700; white-space: nowrap;
+  animation: cam-in 220ms var(--ease-out);
+}
+.cam-alert .i { color: #e8590c; }
+.cam-limit {
+  width: 34px; height: 34px; border-radius: 50%; border: 3px solid #d1242f;
+  background: #fff; color: #111; display: grid; place-items: center;
+  font-size: 14px; font-weight: 800; letter-spacing: -0.3px;
+}
+/* Faster than the camera allows */
+.cam-alert.over { background: #d1242f; color: #fff; }
+.cam-alert.over .i { color: #fff; }
+.cam-alert.over .cam-limit { border-color: #fff; }
+@keyframes cam-in { from { opacity: 0; transform: translateY(-8px) scale(0.96); } }
+@media (prefers-reduced-motion: reduce) { .cam-alert { animation: none; } }
+
 /* Updates panel */
 .updates { top: 16px; right: 96px; bottom: 16px; width: min(400px, calc(100vw - 112px)); padding: 16px; display: flex; flex-direction: column; }
 .updates header { display: flex; align-items: center; justify-content: space-between; }
@@ -273,10 +321,55 @@ body.night .route-meta span:first-child { color: #3fb950; }
 .u-desc { font-size: 15px; color: var(--muted); margin-top: 2px; }
 .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: #bf8700; color: #fff; margin-left: 6px; vertical-align: middle; }
 
-/* Map popups */
-.maplibregl-popup-content { font-size: 16px; border-radius: 12px; padding: 14px 16px; color: #14171a; }
-.popup-title { font-weight: 700; margin-bottom: 4px; }
-.popup-btn { margin-top: 10px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #1f6feb; color: #fff; font-weight: 600; }
+/* Map cards (a dropped pin, a road update, a camera), in the app's own card look
+   and day / night colours. #map outranks the map library's stylesheet, which
+   loads after this one and would otherwise win. */
+#map .maplibregl-popup-content {
+  padding: 16px; border-radius: var(--radius);
+  background: var(--bg); color: var(--fg); box-shadow: var(--shadow);
+  font-size: 16px;
+}
+#map .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+#map .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+#map .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: var(--bg); }
+#map .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+#map .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+#map .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: var(--bg); }
+#map .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--bg); }
+#map .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--bg); }
+#map .maplibregl-popup-close-button {
+  top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 10px;
+  font-size: 24px; line-height: 1; color: var(--muted);
+  transition: background-color 150ms ease;
+}
+#map .maplibregl-popup-close-button:hover, #map .maplibregl-popup-close-button:active { background: var(--press); }
+
+.map-card { min-width: 250px; }
+.mc-head { display: flex; align-items: center; gap: 12px; padding-right: 32px; }
+/* The kind of card at a glance, tinted: accent for a pin, orange for a camera,
+   the update's own colour for a road update */
+.mc-icon {
+  --tint: var(--accent);
+  flex: none; width: 44px; height: 44px; border-radius: 13px;
+  display: grid; place-items: center;
+  color: var(--tint);
+  background: var(--accent-soft);   /* screens too old for color-mix */
+  background: color-mix(in srgb, var(--tint) 15%, transparent);
+}
+.mc-text { min-width: 0; }
+.mc-title { font-size: 17px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.mc-sub { margin-top: 3px; font-size: 14px; color: var(--muted); line-height: 1.3; }
+.mc-sub:empty, .mc-note:empty { display: none; }
+.mc-note { margin-top: 12px; font-size: 15px; color: var(--muted); line-height: 1.4; }
+.popup-btn {
+  margin-top: 14px; width: 100%; height: 50px; border: 0; border-radius: 12px;
+  background: var(--accent); color: #fff; font-size: 17px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: transform 160ms var(--ease-out), filter 150ms ease;
+}
+.popup-btn .i { width: 20px; height: 20px; }
+.popup-btn:active { transform: scale(0.97); filter: brightness(0.95); }
+@media (prefers-reduced-motion: reduce) { .popup-btn:active { transform: none; } }
 
 /* My-location marker: the car seen from above, turning with you.
    Drawn here rather than loaded as an image so it stays sharp at any zoom and
@@ -310,6 +403,10 @@ body.night .route-meta span:first-child { color: #3fb950; }
   .ctrl-3d { font-size: 17px; }
   .phone { top: 78px; left: 16px; right: 80px; width: auto; }
   .updates { right: 16px; left: 16px; width: auto; top: 78px; }
+  .drive-info { top: 78px; gap: 8px; }
+  .limit-sign { width: 50px; height: 50px; border-width: 5px; font-size: 19px; }
+  .cam-alert { height: 46px; padding: 0 14px 0 12px; font-size: 17px; gap: 8px; }
+  .alt b { font-size: 16px; }
 }
 
 /* Portrait car screens — the 17" display in a Model S or X is 1200 x 1920.
@@ -354,6 +451,14 @@ body.night .route-meta span:first-child { color: #3fb950; }
   #pairQr { width: 220px; height: 220px; }
   .paircode { font-size: 54px; }
   .updates { left: 16px; right: 104px; width: auto; top: 100px; bottom: 16px; }
+
+  .drive-info { top: 104px; gap: 12px; }
+  .limit-sign { width: 72px; height: 72px; border-width: 7px; font-size: 27px; }
+  .cam-alert { height: 62px; padding: 0 22px 0 16px; border-radius: 31px; font-size: 23px; }
+  .cam-limit { width: 40px; height: 40px; font-size: 16px; }
+  .alt { padding: 10px 14px; }
+  .alt b { font-size: 20px; }
+  .alt-sub { font-size: 15px; }
 
   .toast { font-size: 19px; bottom: 32px; }
 }

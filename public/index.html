@@ -63,6 +63,16 @@
     </button>
   </div>
 
+  <!-- While driving: the speed limit, and a warning as a speed camera comes up -->
+  <div class="drive-info">
+    <div class="limit-sign" id="limitSign" title="Speed limit" hidden><span id="limitValue"></span></div>
+    <div class="cam-alert" id="camAlert" role="status" hidden>
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8H7l1.6-2.2h6.8L17 8h2.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-8A1.5 1.5 0 0 1 4.5 8z"/><circle cx="12" cy="13.2" r="3.3"/></svg>
+      <span class="cam-limit" id="camLimit"></span>
+      <span class="cam-dist" id="camDist"></span>
+    </div>
+  </div>
+
   <!-- Shown when the page cannot start, instead of a blank map -->
   <div class="boot-error" id="bootError" hidden>
     <div class="boot-error-title" id="bootErrorText"></div>
@@ -129,6 +139,9 @@
       <span id="routeTime"></span>
     </div>
 
+    <!-- Other ways there, before Start (app.js fills it) -->
+    <div class="alts preview-only" id="altRoutes" hidden></div>
+
     <div class="route-actions">
       <button class="btn primary preview-only" id="startNav">Start</button>
       <button class="btn preview-only" id="cancelNav">Cancel</button>
@@ -161,7 +174,7 @@
     <ul id="updatesList" class="updates-list"></ul>
     <footer class="muted small">
       TeslaNaviGeorgia © 2026 Jaba Macharashvili<br />
-      Map © OpenStreetMap contributors · Tiles OpenFreeMap © OpenMapTiles · Terrain Mapzen / AWS · Routing OSRM · Search Photon<br />
+      Map © OpenStreetMap contributors · Tiles OpenFreeMap © OpenMapTiles · Terrain Mapzen / AWS · Routing OSRM · Speed limits Valhalla (FOSSGIS) · Cameras OpenStreetMap · Search Photon<br />
       Not affiliated with Tesla, Inc.
     </footer>
   </aside>

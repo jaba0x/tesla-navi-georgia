@@ -46,6 +46,9 @@
   const REROUTE_COOLDOWN_MS = 15000;
   const ARRIVE_METERS = 25;
   const SPEAK_AT = [800, 200, 45]; // metres before a turn
+  const CAMERA_WARN_METERS = 400;  // a speed camera is announced this far ahead…
+  const CAMERA_WARN_SECONDS = 20;  // …or this many seconds ahead at speed, if further
+  const CAMERA_NEAR_ROAD = 22;     // metres from our line within which a camera watches our road
 
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -64,6 +67,8 @@
     rerouteRun: 0,      // re-routes since we were last properly on the route
     rerouteGaveUp: false,
     spoken: new Set(),
+    alts: null,         // { routes, index }: the ways there to choose from before Start
+    cameras: [],        // speed cameras: [{ id, lon, lat, kmh, dir, kind }]
     updates: [],
     sim: null,
   };
@@ -168,12 +173,29 @@
   function addOverlays() {
     add3D();
     addRouteLayers();
+    addCameraLayer();
     addUpdateLayers();
     if (state.nav) drawRoute();
+    showAlternatives();
   }
 
   function addRouteLayers() {
     if (map.getSource('route')) return;
+    const night = state.theme === 'night';
+
+    // The other ways there, before Start: grey, under the chosen one, each with its time
+    map.addSource('route-alts', { type: 'geojson', data: emptyFC() });
+    map.addLayer({
+      id: 'route-alt-casing', type: 'line', source: 'route-alts',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': night ? '#3d4650' : '#7d8894', 'line-width': lineWidth(13) },
+    });
+    map.addLayer({
+      id: 'route-alt-line', type: 'line', source: 'route-alts',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': night ? '#7a8591' : '#b9c2cc', 'line-width': lineWidth(8) },
+    });
+
     map.addSource('route-done', { type: 'geojson', data: emptyFC() });
     map.addSource('route', { type: 'geojson', data: emptyFC() });
     map.addSource('maneuvers', { type: 'geojson', data: emptyFC() });
@@ -214,11 +236,66 @@
         'circle-stroke-color': '#0b3d91', 'circle-stroke-width': 3,
       },
     });
+    // How long each of the other ways takes, over everything else
+    map.addLayer({
+      id: 'route-alt-label', type: 'symbol', source: 'route-alts',
+      layout: {
+        'symbol-placement': 'line-center', 'text-field': ['get', 'label'],
+        'text-font': ['Noto Sans Bold'], 'text-size': 17, 'text-allow-overlap': true,
+      },
+      paint: {
+        'text-color': night ? '#eef1f4' : '#14171a',
+        'text-halo-color': night ? '#1b1f24' : '#ffffff', 'text-halo-width': 2.5,
+      },
+    });
   }
 
   // Thicker lines as you zoom in, so the route reads well both on an overview and up close
   function lineWidth(base) {
     return ['interpolate', ['linear'], ['zoom'], 8, base * 0.45, 14, base * 0.8, 18, base * 1.4];
+  }
+
+  // Speed cameras: a small orange badge on the streets close up (a whole city of
+  // them is only clutter), upright in the 3D view too
+  function addCameraLayer() {
+    if (!map.hasImage('speed-camera')) map.addImage('speed-camera', cameraIcon(), { pixelRatio: 2 });
+    if (map.getSource('cameras')) return;
+    map.addSource('cameras', { type: 'geojson', data: camerasFC() });
+    map.addLayer({
+      id: 'cameras', type: 'symbol', source: 'cameras', minzoom: 13.5,
+      layout: {
+        'icon-image': 'speed-camera',
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 13.5, 0.6, 17, 1],
+        'icon-allow-overlap': true, 'icon-ignore-placement': true,
+      },
+    });
+  }
+
+  /** The badge, drawn once per map style: a white camera on an orange disc, 28 px. */
+  function cameraIcon() {
+    const s = 56;   // twice the size, for sharp edges on the car's screen
+    const c = document.createElement('canvas');
+    c.width = c.height = s;
+    const g = c.getContext('2d');
+    g.beginPath();
+    g.arc(s / 2, s / 2, s / 2 - 3, 0, Math.PI * 2);
+    g.fillStyle = '#e8590c';
+    g.fill();
+    g.lineWidth = 4;
+    g.strokeStyle = '#fff';
+    g.stroke();
+    // the camera body with its top, then the lens cut out of it
+    g.fillStyle = '#fff';
+    g.beginPath();
+    g.moveTo(15, 22); g.lineTo(21, 22); g.lineTo(24, 18); g.lineTo(32, 18); g.lineTo(35, 22);
+    g.lineTo(41, 22); g.lineTo(41, 38); g.lineTo(15, 38);
+    g.closePath();
+    g.fill();
+    g.beginPath();
+    g.arc(28, 30, 5.5, 0, Math.PI * 2);
+    g.fillStyle = '#e8590c';
+    g.fill();
+    return g.getImageData(0, 0, s, s);
   }
 
   function addUpdateLayers() {
@@ -375,6 +452,8 @@
     state.position = pos;
 
     const progress = state.nav && state.navigating ? trackProgress() : null;
+    updateLimit();
+    checkCameras();
     // While driving a route, ride the road line instead of the raw GPS dot
     const shown = progress && progress.snapped ? progress.snapped : [pos.lon, pos.lat];
 
@@ -589,8 +668,10 @@
     // a road running that way made it pick roads the car was nowhere near when
     // the reported heading was stale, and the drawn route stopped matching the
     // streets. Worth revisiting once the debug overlay shows the heading is good.
+    // A new destination also asks for other ways there, to choose from before Start
+    const alternatives = preview ? '&alternatives=1' : '';
     try {
-      const res = await fetch(`/api/route?from=${origin.lon},${origin.lat}&to=${d.lon},${d.lat}`);
+      const res = await fetch(`/api/route?from=${origin.lon},${origin.lat}&to=${d.lon},${d.lat}${alternatives}`);
       const data = await res.json();
       // A newer destination was picked while this route was on its way
       if (state.destination !== d) return;
@@ -598,14 +679,23 @@
         toast(data.error || data.message || 'No route found');
         return;
       }
+      state.alts = preview && data.routes.length > 1 ? { routes: data.routes, index: 0 } : null;
       startNavigation(data.routes[0], preview);
     } catch {
       toast('Routing failed — check your connection');
     }
   }
 
+  /** What navigation needs from a route, with the speed cameras along it. */
+  function prepareRoute(route) {
+    const nav = N.prepare(route);
+    nav.cameras = routeCameras(nav);
+    nav.limits = null;   // asked for once guidance runs on it (loadLimits)
+    return nav;
+  }
+
   function startNavigation(route, preview) {
-    state.nav = N.prepare(route);
+    state.nav = prepareRoute(route);
     state.progress = null;
     state.spoken.clear();
     state.offRouteFixes = 0;
@@ -630,12 +720,55 @@
       tripChanged();
       panel.classList.remove('collapsed');
       panel.classList.add('preview');
+      showAlternatives();
       setFollow(false);
       fitToRoute();
     } else {
       panel.classList.remove('preview');
+      if (state.navigating) loadLimits(state.nav);
       cameraFollow(false);
     }
+  }
+
+  /** Switch the route preview to another of the ways there. */
+  function chooseRoute(i) {
+    const alts = state.alts;
+    if (!alts || state.navigating || i === alts.index || !alts.routes[i]) return;
+    alts.index = i;
+    state.nav = prepareRoute(alts.routes[i]);
+    state.progress = null;
+    drawRoute();
+    renderSteps();
+    updateBanner();
+    showAlternatives();
+  }
+
+  /** The other ways there: grey lines on the map, and a button for each in the card. */
+  function showAlternatives() {
+    const alts = state.navigating ? null : state.alts;
+    map.getSource('route-alts')?.setData(alts ? {
+      type: 'FeatureCollection',
+      features: alts.routes.map((r, i) => ({
+        type: 'Feature', geometry: r.geometry,
+        properties: { i, label: N.fmtDuration(r.duration) },
+      })).filter((f) => f.properties.i !== alts.index),
+    } : emptyFC());
+
+    const box = $('altRoutes');
+    box.innerHTML = '';
+    box.hidden = !alts;
+    if (!alts) return;
+    alts.routes.forEach((r, i) => {
+      const b = document.createElement('button');
+      b.className = `alt${i === alts.index ? ' selected' : ''}`;
+      b.innerHTML = '<b></b><span class="alt-sub"></span>';
+      b.querySelector('b').textContent = `${N.fmtDuration(r.duration)} · ${N.fmtDist(r.distance)}`;
+      // The road it mostly takes, which is what tells the ways apart
+      const via = (r.legs[0]?.summary || '').split(',')[0].trim();
+      b.querySelector('.alt-sub').textContent = via ? `via ${via}` : '';
+      b.onclick = () => chooseRoute(i);
+      box.appendChild(b);
+    });
   }
 
   /** Begin guidance: swoop down to the car, then hand over to the driving camera. */
@@ -647,6 +780,10 @@
     const panel = $('routePanel');
     panel.classList.remove('preview');
     panel.classList.add('collapsed');
+    // The way is chosen: the others go
+    state.alts = null;
+    showAlternatives();
+    loadLimits(state.nav);
 
     if (state.position) trackProgress();
     updateBanner();
@@ -691,6 +828,8 @@
   function fitToRoute() {
     const b = new maplibregl.LngLatBounds();
     state.nav.coords.forEach((c) => b.extend(c));
+    // and the other ways there, so each can be seen and picked
+    for (const r of state.alts?.routes || []) r.geometry.coordinates.forEach((c) => b.extend(c));
     const panel = $('routePanel').getBoundingClientRect();
     // Keep the route, and the car at its start, out from under the route card:
     // beside it when the screen has room for the route there, otherwise above it.
@@ -714,8 +853,12 @@
     state.progress = null;
     state.offRouteFixes = 0;
     state.destination = null;
+    state.alts = null;
     stopSim();
     destMarker.remove();
+    showAlternatives();
+    updateLimit();
+    checkCameras();
     map.getSource('route')?.setData(emptyFC());
     map.getSource('route-done')?.setData(emptyFC());
     map.getSource('maneuvers')?.setData(emptyFC());
@@ -914,6 +1057,188 @@
   $('voiceBtn').classList.toggle('active', state.voice);
   $('voiceBtn').classList.toggle('muted', !state.voice);
 
+  // ---------------------------------------------------------------- speed limits
+  // Where OpenStreetMap has the signed limit for the road, a sign shows it while
+  // guidance runs. The Worker matches the route to the roads once per route.
+  async function loadLimits(nav) {
+    if (!nav || nav.limits) return;
+    nav.limits = [];   // asked for; stays empty if no answer comes
+    try {
+      const res = await fetch('/api/limits', { method: 'POST', body: N.encodeLine(nav.coords) });
+      if (!res.ok) return;
+      const data = await res.json();
+      // point numbers along the line -> metres from the start of the route
+      nav.limits = (data.limits || []).map(([from, to, kmh]) => [nav.cum[from] ?? 0, nav.cum[to] ?? nav.total, kmh]);
+      if (state.nav === nav) updateLimit();
+    } catch { /* offline: no sign on this route */ }
+  }
+
+  function limitAt(nav, metres) {
+    for (const [from, to, kmh] of nav.limits || []) {
+      if (metres >= from && metres <= to) return kmh;
+    }
+    return null;
+  }
+
+  function kmhNow() {
+    return Math.max(0, (state.position && state.position.speed) || 0) * 3.6;
+  }
+
+  function updateLimit() {
+    const on = state.navigating && state.nav && state.progress;
+    const kmh = on ? limitAt(state.nav, state.progress.traveled) : null;
+    const sign = $('limitSign');
+    sign.hidden = !kmh;
+    if (!kmh) return;
+    $('limitValue').textContent = kmh;
+    sign.classList.toggle('over', kmhNow() > kmh + 5);
+  }
+
+  // ---------------------------------------------------------------- speed cameras
+  // Speed cameras from OpenStreetMap. With a route, those on it are found once
+  // (within a few metres of the line, watching our way of travel), and each is
+  // announced as it comes up. Without one, the road straight ahead is watched.
+  async function loadCameras() {
+    try {
+      const res = await fetch('/api/cameras');
+      const data = await res.json();
+      state.cameras = (data.cameras || []).filter((c) => Number.isFinite(c.lon) && Number.isFinite(c.lat));
+    } catch {
+      return;   // no list: no badges and no warnings, everything else works
+    }
+    map.getSource('cameras')?.setData(camerasFC());
+    if (state.nav) state.nav.cameras = routeCameras(state.nav);
+  }
+
+  function camerasFC() {
+    return {
+      type: 'FeatureCollection',
+      features: state.cameras.map((c) => ({
+        type: 'Feature', geometry: { type: 'Point', coordinates: [c.lon, c.lat] }, properties: { id: c.id },
+      })),
+    };
+  }
+
+  /** Does a camera watch traffic going this way? One with no direction watches both. */
+  function watches(camera, bearing) {
+    return !camera.dir || camera.dir.some((d) => Math.abs(angleDelta(bearing, d)) <= 50);
+  }
+
+  /** The cameras on a route, each with how far along the route it stands. */
+  function routeCameras(nav) {
+    if (!state.cameras.length) return [];
+    let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity;
+    for (const [lon, lat] of nav.coords) {
+      west = Math.min(west, lon); east = Math.max(east, lon);
+      south = Math.min(south, lat); north = Math.max(north, lat);
+    }
+    const pad = 0.001;   // ~100 m: only cameras inside the route's box get a closer look
+    const found = [];
+    for (const c of state.cameras) {
+      if (c.lon < west - pad || c.lon > east + pad || c.lat < south - pad || c.lat > north + pad) continue;
+      const m = N.project([c.lon, c.lat], nav.coords, nav.cum, 0);
+      if (m.distance > CAMERA_NEAR_ROAD) continue;
+      const along = N.bearing(N.pointAt(nav, m.offset - 15), N.pointAt(nav, m.offset + 15));
+      if (watches(c, along)) found.push({ ...c, offset: m.offset });
+    }
+    return found.sort((a, b) => a.offset - b.offset);
+  }
+
+  function warnDistance() {
+    const speed = (state.position && state.position.speed) || 0;
+    return Math.min(1000, Math.max(CAMERA_WARN_METERS, speed * CAMERA_WARN_SECONDS));
+  }
+
+  function checkCameras() {
+    const p = state.progress;
+    if (state.navigating && state.nav && p) {
+      // the first camera not yet passed, once it is close enough
+      const next = (state.nav.cameras || []).find((c) => c.offset > p.traveled - 10);
+      const distance = next ? next.offset - p.traveled : Infinity;
+      showCamera(distance <= warnDistance() ? next : null, distance);
+      return;
+    }
+    const ahead = cameraAhead();
+    showCamera(ahead && ahead.camera, ahead && ahead.distance);
+  }
+
+  /** No route: the nearest camera on the road straight ahead, watching our way. */
+  function cameraAhead() {
+    const pos = state.position;
+    if (!pos || state.navigating || !Number.isFinite(pos.heading) || !(pos.speed > 3)) return null;
+    const here = [pos.lon, pos.lat];
+    const reach = warnDistance();
+    let best = null;
+    for (const c of state.cameras) {
+      if (Math.abs(c.lat - pos.lat) > 0.01) continue;   // ~1 km: not near
+      const distance = N.haversine(here, [c.lon, c.lat]);
+      if (distance > reach || (best && distance > best.distance)) continue;
+      const off = Math.abs(angleDelta(pos.heading, N.bearing(here, [c.lon, c.lat])));
+      const aside = distance * Math.sin((off * Math.PI) / 180);
+      if (off > 40 || aside > CAMERA_NEAR_ROAD || !watches(c, pos.heading)) continue;
+      best = { camera: c, distance };
+    }
+    return best;
+  }
+
+  const chimed = new Map();   // camera id -> when it last chimed
+  function showCamera(camera, distance) {
+    const box = $('camAlert');
+    box.hidden = !camera;
+    if (!camera) return;
+    $('camLimit').hidden = !camera.kmh;
+    $('camLimit').textContent = camera.kmh || '';
+    $('camDist').textContent = N.fmtDist(distance);
+    box.classList.toggle('over', Boolean(camera.kmh) && kmhNow() > camera.kmh);
+    // Once per camera: a warning that flickers with the GPS must not chime again
+    if (!(Date.now() - (chimed.get(camera.id) || 0) < 5 * 60 * 1000)) {
+      chimed.set(camera.id, Date.now());
+      chime();
+    }
+  }
+
+  const CAMERA_NAMES = { speed: 'Speed camera', average: 'Average speed check', red_light: 'Red light camera' };
+  function showCameraPopup(id) {
+    const c = state.cameras.find((x) => x.id === id);
+    if (!c) return;
+    openCard([c.lon, c.lat], mapCard({
+      icon: CAMERA_ICON, tint: '#e8590c',
+      title: CAMERA_NAMES[c.kind] || CAMERA_NAMES.speed,
+      sub: c.kmh ? `Limit ${c.kmh} km/h` : 'Limit not recorded',
+      note: 'From OpenStreetMap',
+    }));
+  }
+
+  // A short two-note chime for a camera, when voice guidance is on. A page may
+  // only make sound after the first tap on it, so the sound is readied then.
+  let audio = null;
+  addEventListener('pointerdown', () => {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    try {
+      if (!audio && Ctx) audio = new Ctx();
+      else if (audio && audio.state === 'suspended') audio.resume();
+    } catch { /* no sound on this screen */ }
+  }, true);
+
+  function chime() {
+    if (!state.voice || !audio) return;
+    try {
+      const t = audio.currentTime + 0.02;
+      for (const [freq, at] of [[988, 0], [1319, 0.17]]) {
+        const osc = audio.createOscillator();
+        const gain = audio.createGain();
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, t + at);
+        gain.gain.exponentialRampToValueAtTime(0.3, t + at + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.24);
+        osc.connect(gain);
+        gain.connect(audio.destination);
+        osc.start(t + at);
+        osc.stop(t + at + 0.26);
+      }
+    } catch { /* no sound */ }
+  }
+
   // ---------------------------------------------------------------- screen on
   // A phone switches its screen off after a short while, and a page on a locked
   // phone gets no GPS fixes, so guidance would freeze mid-trip. Hold a screen wake
@@ -955,18 +1280,124 @@
       if (u) showUpdatePopup(u);
       return;
     }
+    const camera = map.getLayer('cameras') && map.queryRenderedFeatures(e.point, { layers: ['cameras'] })[0];
+    if (camera) {
+      showCameraPopup(camera.properties.id);
+      return;
+    }
+    // Before Start, a tap on one of the other ways picks it. A finger is wide, so
+    // look around the tap; where the chosen route runs over the same road, it wins.
+    if (state.alts && !state.navigating && map.getLayer('route-alt-casing')) {
+      const { x, y } = e.point;
+      const box = [[x - 14, y - 14], [x + 14, y + 14]];
+      const alt = map.queryRenderedFeatures(box, { layers: ['route-alt-casing'] })[0];
+      if (alt && !map.queryRenderedFeatures(box, { layers: ['route-casing'] }).length) {
+        chooseRoute(alt.properties.i);
+        return;
+      }
+    }
     const { lng, lat } = e.lngLat;
-    const el = document.createElement('div');
-    el.innerHTML = `<div class="popup-title">Dropped pin</div>
-      <div class="small muted">${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
-      <button class="popup-btn">Drive here</button>`;
-    const popup = new maplibregl.Popup({ closeButton: true, focusAfterOpen: false })
-      .setLngLat(e.lngLat).setDOMContent(el).addTo(map);
-    onDeliberateTap(el.querySelector('button'), () => {
-      popup.remove();
-      setDestination({ lon: lng, lat, name: 'Dropped pin' });
+    const place = { lon: lng, lat, name: 'Dropped pin' };
+    const card = mapCard({
+      icon: PIN_ICON, title: place.name, sub: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+      note: distanceNote(place), drive: () => driveToPin(place),
+    });
+    const popup = openCard([lng, lat], card);
+    // Then name the spot: the place there, or its address
+    whatIsHere(lat, lng).then((found) => {
+      if (!found || !popup.isOpen()) return;
+      card.querySelector('.mc-title').textContent = found.title;
+      card.querySelector('.mc-sub').textContent = found.sub;
+      if (found.exact) place.name = found.title;
     });
   });
+
+  function driveToPin(place) {
+    input.value = place.name;
+    $('clearSearch').hidden = false;
+    setDestination({ ...place });
+  }
+
+  const PIN_ICON = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5s-7-6-7-11.6a7 7 0 0 1 14 0c0 5.6-7 11.6-7 11.6z"/><circle cx="12" cy="9.8" r="2.6"/></svg>';
+  const DRIVE_ICON = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 19 20l-7-3.6L5 20z"/></svg>';
+  const CAMERA_ICON = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8H7l1.6-2.2h6.8L17 8h2.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-8A1.5 1.5 0 0 1 4.5 8z"/><circle cx="12" cy="13.2" r="3.3"/></svg>';
+  const WARNING_ICON = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.3 2.7 17.5a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4M12 17h.01"/></svg>';
+
+  /**
+   * The card that opens on the map for a dropped pin, a road update or a camera:
+   * an icon, a title with a line under it, a note, and a "Drive here" button when
+   * `drive` is given. Its look follows the day / night theme (style.css).
+   */
+  function mapCard({ icon, tint, title, sub, note, drive }) {
+    const el = document.createElement('div');
+    el.className = 'map-card';
+    el.innerHTML = `<div class="mc-head"><span class="mc-icon">${icon}</span>` +
+      '<div class="mc-text"><div class="mc-title"></div><div class="mc-sub"></div></div></div>' +
+      '<div class="mc-note"></div>';
+    if (tint) el.querySelector('.mc-icon').style.setProperty('--tint', tint);
+    el.querySelector('.mc-title').textContent = title;
+    el.querySelector('.mc-sub').textContent = sub || '';
+    el.querySelector('.mc-note').textContent = note || '';
+    if (drive) {
+      const button = document.createElement('button');
+      button.className = 'popup-btn';
+      button.innerHTML = `${DRIVE_ICON}<span>Drive here</span>`;
+      el.appendChild(button);
+      el.drive = drive;
+    }
+    return el;
+  }
+
+  function openCard(lngLat, card) {
+    const popup = new maplibregl.Popup({ focusAfterOpen: false, maxWidth: '360px', offset: 10 })
+      .setLngLat(lngLat).setDOMContent(card).addTo(map);
+    const button = card.querySelector('.popup-btn');
+    if (button) {
+      onDeliberateTap(button, () => {
+        popup.remove();
+        card.drive();
+      });
+    }
+    return popup;
+  }
+
+  /** "2.4 km from you", when we know where you are. */
+  function distanceNote(place) {
+    const p = state.position;
+    if (!p) return '';
+    const d = N.haversine([p.lon, p.lat], [place.lon, place.lat]);
+    return d < 30 ? 'You are here' : `${N.fmtDist(d)} from you`;
+  }
+
+  /**
+   * What is at a spot: the nearest place there, or else its address. Statues,
+   * plaques and the like are passed over: they are what a finger lands on in a
+   * city centre, and no name for a destination. `exact` when the answer is right
+   * where the finger went, so it can name the destination too.
+   */
+  const MINOR = /^(historic|man_made|natural)=|^tourism=(artwork|viewpoint|information)$/;
+  async function whatIsHere(lat, lon) {
+    try {
+      const res = await fetch(`/api/reverse?lat=${lat}&lon=${lon}`);
+      const found = res.ok ? (await res.json()).features || [] : [];
+      const f = found.find((x) => !MINOR.test(`${x.properties.osm_key}=${x.properties.osm_value}`)) || found[0];
+      if (!f) return null;
+      const p = f.properties || {};
+      const street = [p.street, p.housenumber].filter(Boolean).join(' ');
+      const area = [p.district, p.city || p.town || p.village].filter((v, i, a) => v && a.indexOf(v) === i).join(', ');
+      const title = p.name || street;
+      if (!title) return null;
+      const away = N.haversine([lon, lat], f.geometry.coordinates);
+      if (away > 150) return { title: 'Dropped pin', sub: `Near ${title}`, exact: false };
+      return {
+        title,
+        sub: [p.name && street, area].filter(Boolean).join(' · '),
+        exact: true,
+      };
+    } catch {
+      return null;
+    }
+  }
 
   /**
    * A popup opens right under the finger. A touch screen that reports the same
@@ -1297,19 +1728,13 @@
   }
 
   function showUpdatePopup(u) {
-    const el = document.createElement('div');
-    el.innerHTML = `<div class="popup-title"></div><div class="p-desc"></div>
-      <div class="small muted p-src"></div><button class="popup-btn">Drive here</button>`;
-    el.querySelector('.popup-title').textContent = u.title + (u.example ? ' (sample)' : '');
-    el.querySelector('.p-desc').textContent = u.description || '';
-    el.querySelector('.p-src').textContent = [u.source, u.updated && new Date(u.updated).toLocaleDateString()]
-      .filter(Boolean).join(' · ');
-    const popup = new maplibregl.Popup({ focusAfterOpen: false })
-      .setLngLat([u.lon, u.lat]).setDOMContent(el).addTo(map);
-    onDeliberateTap(el.querySelector('button'), () => {
-      popup.remove();
-      setDestination({ lon: u.lon, lat: u.lat, name: u.title });
-    });
+    openCard([u.lon, u.lat], mapCard({
+      icon: WARNING_ICON, tint: UPDATE_COLORS[u.type] || UPDATE_COLORS.info,
+      title: u.title + (u.example ? ' (sample)' : ''),
+      sub: [u.source, u.updated && new Date(u.updated).toLocaleDateString()].filter(Boolean).join(' · '),
+      note: u.description,
+      drive: () => setDestination({ lon: u.lon, lat: u.lat, name: u.title }),
+    }));
   }
 
   function updatesFC() {
@@ -1509,6 +1934,7 @@
   }
 
   loadUpdates();
+  loadCameras();
   // 'style.load', not 'load': with 3D terrain switched on, 'load' never fires
   map.once('style.load', () => { if (!openDeepLink()) resumeTrip(); });
 

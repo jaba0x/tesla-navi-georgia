@@ -115,6 +115,27 @@ window.GeoNav = (() => {
     ];
   }
 
+  /** The route line as an encoded polyline (Google's format, 5 decimals), to send it compactly. */
+  function encodeLine(coords) {
+    let out = '', lat = 0, lon = 0;
+    const put = (delta) => {
+      let v = delta < 0 ? ~(delta << 1) : delta << 1;
+      while (v >= 0x20) {
+        out += String.fromCharCode((0x20 | (v & 0x1f)) + 63);
+        v >>= 5;
+      }
+      out += String.fromCharCode(v + 63);
+    };
+    for (const [x, y] of coords) {
+      const ly = Math.round(y * 1e5), lx = Math.round(x * 1e5);
+      put(ly - lat);
+      put(lx - lon);
+      lat = ly;
+      lon = lx;
+    }
+    return out;
+  }
+
   /** The part of the route between two distances, as a LineString. */
   function slice(nav, fromMetres, toMetres) {
     const { coords, cum } = nav;
@@ -219,7 +240,7 @@ window.GeoNav = (() => {
   }
 
   return {
-    haversine, bearing, prepare, project, pointAt, slice,
+    haversine, bearing, prepare, project, pointAt, slice, encodeLine,
     instruction, spoken, fmtDist, fmtDuration, arrow,
   };
 })();
