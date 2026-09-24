@@ -2,10 +2,13 @@
  * Checks that a real missed turn re-routes, and that a merely coarse GPS does not.
  * node nav.test.js
  */
-const fs = require('fs');
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const here = path.dirname(fileURLToPath(import.meta.url));
 global.window = {};
-new Function(fs.readFileSync(require('path').join(__dirname,'..','public','nav.js'), 'utf8'))();
+new Function(fs.readFileSync(path.join(here, '..', 'public', 'nav.js'), 'utf8'))();
 const N = global.window.GeoNav;
 
 // ---- a route: east along one street, right turn, then south -----------------

@@ -2,10 +2,12 @@
  * Everything is original vector work built from the project's own bolt mark and
  * the car marker that is already on the map.
  */
-const { chromium } = require('playwright');
-const path = require('path');
+import { chromium } from 'playwright';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const OUT = path.join(__dirname, '..', 'docs', 'brand');
+const here = path.dirname(fileURLToPath(import.meta.url));
+const OUT = path.join(here, '..', 'docs', 'brand');
 
 const RED = '#e31937';
 const RED_DARK = '#a50c23';

@@ -1,7 +1,10 @@
 /* Password hashing, the part that must not be wrong.
  * node test/auth.test.js
  */
-const path = require('path');
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 let failures = 0;
 function check(name, got, want) {
@@ -12,7 +15,7 @@ function check(name, got, want) {
 
 (async () => {
   const { hashPassword, verifyPassword } =
-    await import(path.join(__dirname, '..', 'src', 'accounts.js'));
+    await import(path.join(here, '..', 'src', 'accounts.js'));
 
   const stored = await hashPassword('correct horse battery staple');
   const [scheme, iterations, salt, digest] = stored.split('$');

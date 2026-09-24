@@ -82,10 +82,13 @@ There is no sign-up page. Accounts are made from the command line, which is why 
 site has no registration surface to attack:
 
 ```bash
-node tools/adduser.mjs jaba          # asks for a password, writes .adduser.sql
-npx wrangler d1 execute geodrive-inbox --remote --file=.adduser.sql
-rm .adduser.sql
+node tools/adduser.mjs jaba \
+  && npx wrangler d1 execute geodrive-inbox --remote --file=.adduser.sql \
+  && rm .adduser.sql
 ```
+
+Chained with `&&` on purpose: if the password is rejected the later steps stop
+rather than running against a file that was never written.
 
 The password is typed at the prompt and never written down. What lands in the
 database is a PBKDF2-SHA256 hash with a per-account salt, at 100,000 iterations,
