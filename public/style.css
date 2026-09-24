@@ -225,3 +225,41 @@ body.night .route-meta span:first-child { color: #3fb950; }
   body { font-size: 16px; }
   .updates { right: 16px; left: 16px; width: auto; top: 96px; }
 }
+
+/* Portrait car screens — the 17" display in a Model S or X is 1200 x 1920.
+   The landscape layout is untouched; here the panels span the width and the
+   turn card sits along the bottom, near where the driver is already looking,
+   instead of being marooned in the corner of a very tall screen. */
+@media (orientation: portrait) and (min-width: 700px) {
+  body { font-size: 20px; }
+
+  .search { left: 16px; right: 104px; width: auto; top: 96px; }
+  .search input { height: 72px; font-size: 22px; }
+  .results li { padding: 16px 20px; }
+
+  .round-btn { width: 72px; height: 72px; font-size: 30px; }
+  #view3dBtn { font-size: 22px; }
+
+  .route { left: 16px; right: 16px; width: auto; max-height: 46vh; padding: 18px; }
+  .route.collapsed { width: auto; padding: 14px 18px; }
+  .route.collapsed .next-arrow { width: 74px; height: 74px; }
+  .route.collapsed .next-arrow svg { width: 52px; height: 52px; }
+  .route.collapsed .next-dist { font-size: 34px; }
+  .route.collapsed .next-instr { font-size: 22px; }
+  .route.collapsed .route-meta { font-size: 17px; }
+  .next-arrow { width: 92px; height: 92px; border-radius: 18px; }
+  .next-arrow svg { width: 64px; height: 64px; }
+  .next-dist { font-size: 38px; }
+  .next-instr { font-size: 24px; }
+  .then { font-size: 19px; }
+  .route-meta { font-size: 20px; }
+  .btn { height: 60px; }
+  .steps li { font-size: 18px; padding: 13px 4px; }
+
+  .phone { left: 16px; right: 104px; width: auto; top: 96px; }
+  #pairQr { width: 220px; height: 220px; }
+  .paircode { font-size: 54px; }
+  .updates { left: 16px; right: 104px; width: auto; top: 96px; bottom: 16px; }
+
+  .toast { font-size: 19px; bottom: 32px; }
+}
