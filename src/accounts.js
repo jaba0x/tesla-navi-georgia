@@ -13,7 +13,7 @@ const SESSION_DAYS = 120;          // a car should not ask you to sign in every 
 // The Workers runtime refuses anything above 100,000 ("iteration counts above
 // 100000 are not supported"), so this is the ceiling rather than a choice. The
 // shortfall against OWASP guidance is covered by there being no public sign-up,
-// a ten character minimum on passwords and a lock-out after eight bad tries.
+// no public sign-up and a lock-out after eight bad tries on a username.
 const PBKDF2_ITERATIONS = 100000;
 const MAX_FAILURES = 8;
 const FAILURE_WINDOW_MS = 10 * 60 * 1000;
