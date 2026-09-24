@@ -129,5 +129,6 @@ Handy while developing:
 
 - `?sim=1` with a destination drives the route by itself: `/?to=44.8010,41.7250&name=Rike%20Park&sim=1`
 - `?miss=1` alongside `sim=1` drives straight past the first turn, to test re-routing
+- `?debug=1` shows GPS accuracy, distance off the route line and the re-route counters
 - `?gl1` forces the old-screen version on any browser
 - `window.geodrive` in the console exposes the map and state

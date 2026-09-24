@@ -29,11 +29,12 @@
   const IDLE_ZOOM = 14.5;          // what the map comes back to when a trip ends
   const CAR_OFFSET = 0.18; // how far below the middle of the screen the car sits
   const OFF_ROUTE_METERS = 45;
-  const ACCURACY_SLACK_MAX = 25;   // car GPS can claim 200 m of error; don't believe all of it
-  const OFF_ROUTE_FIXES = 2;       // fixes in a row before we accept that we left the route
+  const ACCURACY_SLACK_MAX = 60;   // believe some of the car's accuracy figure, not all of it
+  const OFF_ROUTE_FIXES = 4;       // fixes in a row, all drifting further, before we believe it
+  const MAX_REROUTES = 3;          // then stop, rather than re-route in circles
   const BACKSTEP_METERS = 25;      // smaller than this and it's jitter, not a correction
   const STEP_PASSED_METERS = 10;   // hold the instruction until the turn is behind us
-  const REROUTE_COOLDOWN_MS = 12000;
+  const REROUTE_COOLDOWN_MS = 15000;
   const ARRIVE_METERS = 25;
   const SPEAK_AT = [800, 200, 45]; // metres before a turn
 
@@ -50,10 +51,42 @@
     progress: null,     // { traveled, stepIndex, toNext, remaining, eta }
     lastReroute: 0,
     offRouteFixes: 0,
+    offRouteDist: 0,    // last measured distance from the line, to spot real drift
+    rerouteRun: 0,      // re-routes since we were last properly on the route
+    rerouteGaveUp: false,
     spoken: new Set(),
     updates: [],
     sim: null,
   };
+
+  // Bumped whenever the driver drags the map, so a camera flight that finishes
+  // afterwards knows not to grab the view back from them
+  let panToken = 0;
+
+  // ?debug=1 puts the raw numbers on screen. A photo of the car screen then says
+  // what the GPS and the route matcher are really doing, instead of us guessing.
+  const debugEl = new URLSearchParams(location.search).has('debug')
+    ? document.createElement('pre') : null;
+  if (debugEl) {
+    debugEl.style.cssText = 'position:fixed;left:16px;bottom:16px;z-index:9;margin:0;' +
+      'padding:10px 12px;border-radius:10px;background:rgba(0,0,0,.75);color:#7ee787;' +
+      'font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;pointer-events:none';
+    document.body.appendChild(debugEl);
+  }
+  const num = (v, digits = 0) => (typeof v === 'number' && isFinite(v) ? v.toFixed(digits) : '–');
+
+  function debugOut(match) {
+    if (!debugEl) return;
+    const p = state.position || {};
+    const limit = OFF_ROUTE_METERS + Math.min(p.accuracy || 0, ACCURACY_SLACK_MAX);
+    debugEl.textContent = [
+      `acc    ${num(p.accuracy)} m      speed ${num(p.speed, 1)} m/s`,
+      `head   ${num(p.heading)}         follow ${state.follow}`,
+      `offset ${num(match && match.distance)} m      limit ${num(limit)} m`,
+      `step   ${num(state.progress && state.progress.stepIndex)}         toNext ${num(state.progress && state.progress.toNext)} m`,
+      `offFix ${state.offRouteFixes}          reroutes ${state.rerouteRun}`,
+    ].join('\n');
+  }
 
   // ---------------------------------------------------------------- map
   document.body.classList.toggle('night', state.theme === 'night');
@@ -82,7 +115,7 @@
   });
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
   map.on('style.load', () => { window.geodriveMapReady = true; addOverlays(); });
-  map.on('dragstart', () => setFollow(false));
+  map.on('dragstart', () => { panToken++; setFollow(false); });
 
   function addOverlays() {
     add3D();
@@ -406,6 +439,34 @@
   requestAnimationFrame(frame);
 
   // Jump straight to the car — used when follow mode is switched back on
+  /** Take the camera back from an animation and hand it to the follow loop. */
+  function resumeFollow() {
+    Object.assign(cam, {
+      lon: map.getCenter().lng, lat: map.getCenter().lat,
+      bearing: map.getBearing(), zoom: map.getZoom(), pitch: map.getPitch(),
+    });
+    state.follow = true;
+    $('followBtn').classList.add('active');
+  }
+
+  /**
+   * Resume following once a flight ends. The timer is the important part: a
+   * moveend can be swallowed by another camera move, and when that happened the
+   * follow flag stayed off and the driving camera never came back at all.
+   * Only a deliberate drag cancels it.
+   */
+  function afterFlight(ms) {
+    const token = panToken;
+    let done = false;
+    const finish = () => {
+      if (done || panToken !== token) return;
+      done = true;
+      resumeFollow();
+    };
+    map.once('moveend', finish);
+    setTimeout(finish, ms + 500);
+  }
+
   function cameraFollow(instant) {
     if (!state.follow || !state.position) return;
     const target = cameraTarget();
@@ -433,17 +494,12 @@
       origin = { lon: c.lng, lat: c.lat };
       toast('No GPS yet — routing from the map center');
     }
-    // Which way the car is pointing, so a re-route starts down the road we are
-    // actually on instead of opening with a U-turn across the carriageway.
-    // Only a real GPS heading counts; the route-derived one still points along
-    // the route we have just left.
-    const p = state.position;
-    const heading = p && Number.isFinite(p.heading) && p.speed > 2 ? Math.round(p.heading) : null;
-
+    // No heading is sent. /api/route still accepts one, but constraining OSRM to
+    // a road running that way made it pick roads the car was nowhere near when
+    // the reported heading was stale, and the drawn route stopped matching the
+    // streets. Worth revisiting once the debug overlay shows the heading is good.
     try {
-      let q = `from=${origin.lon},${origin.lat}&to=${d.lon},${d.lat}`;
-      if (!preview && heading !== null) q += `&bearing=${(heading % 360 + 360) % 360}`;
-      const res = await fetch(`/api/route?${q}`);
+      const res = await fetch(`/api/route?from=${origin.lon},${origin.lat}&to=${d.lon},${d.lat}`);
       const data = await res.json();
       if (!res.ok || data.code !== 'Ok' || !data.routes?.length) {
         toast(data.error || data.message || 'No route found');
@@ -460,7 +516,12 @@
     state.progress = null;
     state.spoken.clear();
     state.offRouteFixes = 0;
+    state.offRouteDist = 0;
     state.lastReroute = Date.now();
+    if (preview) {                 // a fresh destination, not a re-route
+      state.rerouteRun = 0;
+      state.rerouteGaveUp = false;
+    }
 
     drawRoute();
     renderSteps();
@@ -511,14 +572,7 @@
       curve: 1.5,   // dip out and back in, like a camera swooping down
       essential: true,
     });
-    map.once('moveend', () => {
-      // Hand the camera to the follow loop exactly where the flight ended
-      Object.assign(cam, {
-        lon: map.getCenter().lng, lat: map.getCenter().lat,
-        bearing: map.getBearing(), zoom: map.getZoom(), pitch: map.getPitch(),
-      });
-      state.follow = true;
-    });
+    afterFlight(LITE ? 900 : 1900);
   }
 
   $('startNav').onclick = beginGuidance;
@@ -574,20 +628,9 @@
 
     // Stand the chase loop down for the flight, or it fights the animation
     state.follow = false;
-    map.easeTo({
-      center, zoom: IDLE_ZOOM, bearing: 0, pitch: 0,
-      duration: LITE ? 600 : 1100,
-      essential: true,
-    });
-    map.once('moveend', () => {
-      if (state.nav) return;          // a new trip started mid-flight
-      Object.assign(cam, {
-        lon: map.getCenter().lng, lat: map.getCenter().lat,
-        bearing: map.getBearing(), zoom: map.getZoom(), pitch: map.getPitch(),
-      });
-      state.follow = true;
-      $('followBtn').classList.add('active');
-    });
+    const ms = LITE ? 600 : 1100;
+    map.easeTo({ center, zoom: IDLE_ZOOM, bearing: 0, pitch: 0, duration: ms, essential: true });
+    afterFlight(ms);
   }
   // Tap the turn bar to show or hide the trip details
   $('navSummary').onclick = () => {
@@ -611,18 +654,34 @@
     // registered at all, so the old line stayed on screen the whole way.
     const slack = Math.min(state.position.accuracy || 0, ACCURACY_SLACK_MAX);
     if (match.distance > OFF_ROUTE_METERS + slack) {
-      state.offRouteFixes++;
+      // Count it only while we keep drifting further off. A position that is
+      // merely coarse sits at a steady distance, and re-routing on that put the
+      // car in a loop of fresh routes it had never been on.
+      const diverging = match.distance > state.offRouteDist + 5;
+      state.offRouteFixes = diverging ? state.offRouteFixes + 1 : 0;
+      state.offRouteDist = match.distance;
+
       if (state.offRouteFixes >= OFF_ROUTE_FIXES &&
+          state.rerouteRun < MAX_REROUTES &&
           Date.now() - state.lastReroute > REROUTE_COOLDOWN_MS) {
+        state.rerouteRun++;
         state.lastReroute = Date.now();
         state.offRouteFixes = 0;
         toast('Re-routing…');
         speak('Re-routing');
         requestRoute(false);
+      } else if (state.rerouteRun >= MAX_REROUTES && !state.rerouteGaveUp) {
+        // Better to leave the route on screen than to keep redrawing it
+        state.rerouteGaveUp = true;
+        toast('Cannot place the car on a road — keeping this route');
       }
+      debugOut(match);
       return state.progress;
     }
     state.offRouteFixes = 0;
+    state.offRouteDist = 0;
+    state.rerouteRun = 0;          // properly on the line again
+    state.rerouteGaveUp = false;
 
     // Move forward freely, backward only on a confident match. Pinning this to
     // the highest value ever seen meant a single bad snap advanced the guidance
@@ -659,6 +718,7 @@
     updateBanner();
     drawRoute();
     maybeSpeak();
+    debugOut(match);
     return state.progress;
   }
 

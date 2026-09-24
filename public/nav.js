@@ -91,10 +91,12 @@ window.GeoNav = (() => {
     const near = scan(start);
     // Nothing close on the road ahead. Look at the whole route before giving up,
     // otherwise one bad match pins guidance to the wrong part of the line and it
-    // never finds its way back.
-    if (near.distance > 60 && start > 0) {
+    // never finds its way back. The result has to be clearly better, or a merely
+    // coarse position starts hopping between parts of the route that happen to
+    // run near each other.
+    if (near.distance > 120 && start > 0) {
       const all = scan(0);
-      if (all.distance < near.distance) return all;
+      if (all.distance < near.distance * 0.5) return all;
     }
     return near;
   }
