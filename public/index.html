@@ -6,37 +6,74 @@
   <meta name="theme-color" content="#111418" />
   <meta name="author" content="Jaba Macharashvili" />
   <title>TeslaNaviGeorgia — navigation for Georgia</title>
+  <!-- Add to Home Screen: opens full screen, with its own name and icon -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="TeslaNavi" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <!-- Open the connection to the map server while the page is still starting -->
+  <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <div id="map"></div>
 
-  <!-- Search -->
-  <div class="card search" id="searchCard">
-    <input id="searchInput" type="search" placeholder="Search, or paste a Google Maps link…" autocomplete="off" />
-    <button class="icon-btn" id="clearSearch" title="Clear" hidden>✕</button>
-    <ul id="searchResults" class="results" hidden></ul>
+  <!-- Search along the top, with the one-tap Home / Work trips beside it -->
+  <div class="topbar">
+    <div class="card search" id="searchCard">
+      <input id="searchInput" type="search" placeholder="Search, or paste a Google Maps link…" autocomplete="off" />
+      <button class="icon-btn" id="clearSearch" title="Clear" hidden>
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+      <ul id="searchResults" class="results" hidden></ul>
+    </div>
+    <div class="places" id="places">
+      <button class="place-chip" id="homeChip" title="Home">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5"/><path d="M6 9v10.5h12V9"/><path d="M10 19.5v-5h4v5"/></svg>
+        <span>Home</span>
+      </button>
+      <button class="place-chip" id="workChip" title="Work">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7.5" width="18" height="12.5" rx="2.5"/><path d="M8.5 7.5V6a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v1.5"/><path d="M3 13h18"/></svg>
+        <span>Work</span>
+      </button>
+    </div>
   </div>
 
   <!-- Map controls -->
   <div class="controls">
-    <button class="round-btn" id="followBtn" title="Follow my location">◎</button>
-    <button class="round-btn" id="view3dBtn" title="3D view">3D</button>
-    <button class="round-btn" id="voiceBtn" title="Voice guidance">🔊</button>
-    <button class="round-btn" id="phoneBtn" title="Send a place from your phone">📱</button>
-    <button class="round-btn" id="updatesBtn" title="Road updates">⚠</button>
-    <button class="round-btn" id="themeBtn" title="Day / night map">◐</button>
+    <button class="ctrl-btn" id="followBtn" title="Follow my location">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle class="fill" cx="12" cy="12" r="2.6"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg>
+    </button>
+    <button class="ctrl-btn" id="view3dBtn" title="3D view"><span class="ctrl-3d">3D</span></button>
+    <button class="ctrl-btn" id="voiceBtn" title="Voice guidance">
+      <svg class="i on" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z"/><path d="M15.5 9.2a4 4 0 0 1 0 5.6M18.3 6.6a7.6 7.6 0 0 1 0 10.8"/></svg>
+      <svg class="i off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5h3.2L12 5.5v13l-4.8-4H4z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>
+    </button>
+    <button class="ctrl-btn" id="phoneBtn" title="Send a place from your phone">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/></svg>
+    </button>
+    <button class="ctrl-btn" id="updatesBtn" title="Road updates">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.3 2.7 17.5a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4M12 17h.01"/></svg>
+    </button>
+    <button class="ctrl-btn" id="themeBtn" title="Day / night map">
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path class="fill" d="M12 3.5a8.5 8.5 0 0 1 0 17z"/></svg>
+    </button>
   </div>
 
   <!-- Shown when the page cannot start, instead of a blank map -->
   <div class="boot-error" id="bootError" hidden>
     <div class="boot-error-title" id="bootErrorText"></div>
     <div class="boot-error-detail small" id="bootErrorDetail"></div>
-    <div class="small muted">Open tesla.jaba.ge/check.html for details about this browser.</div>
+    <div class="small muted">Open <span class="site-host"></span>/check.html for details about this browser.</div>
   </div>
 
-  <!-- Brand / credit -->
-  <div class="brand" id="brand">
+  <!-- Brand and credits in the bottom-right corner: just the logo, and a tap shows
+       the rest. It starts open, so the map sources are named when the map first
+       appears, as their licences ask, then folds away (app.js). -->
+  <button class="brand" id="brand" title="About this map" aria-expanded="true">
     <svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
       <rect width="40" height="40" rx="11" fill="#e31937"/>
       <path d="M23.5 6.5 12.5 22.5h6.2L16.5 33.5l11.2-16.3h-6.4z" fill="#fff"/>
@@ -44,16 +81,21 @@
     <span class="brand-text">
       <b>TeslaNaviGeorgia</b>
       <span class="brand-sub">© 2026 Jaba Macharashvili</span>
+      <span class="brand-sub">Map © OpenStreetMap</span>
+      <span class="brand-sub">Tiles OpenFreeMap © OpenMapTiles</span>
+      <span class="brand-sub">Elevation Mapzen / AWS Open Data</span>
     </span>
-  </div>
+  </button>
 
   <!-- Send a destination from a phone -->
   <aside class="card phone" id="phonePanel" hidden>
     <header>
       <h2>Send from your phone</h2>
-      <button class="icon-btn" id="closePhone" title="Close">✕</button>
+      <button class="icon-btn" id="closePhone" title="Close">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
     </header>
-    <p class="muted">On your phone open <b>tesla.jaba.ge/send</b>, paste a Google Maps link and enter this code:</p>
+    <p class="muted">On your phone open <b><span class="site-host"></span>/send</b>, paste a Google Maps link and enter this code:</p>
     <div class="paircode" id="pairCode">····</div>
     <img id="pairQr" alt="QR code for the phone page" hidden />
     <p class="muted small" id="phoneStatus">Waiting for a place from your phone…</p>
@@ -93,6 +135,16 @@
       <button class="btn drive-only" id="stepsToggle">Steps</button>
       <button class="btn danger drive-only" id="endRoute">End</button>
     </div>
+    <div class="save-row preview-only">
+      <button class="btn small" id="homeSave">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5"/><path d="M6 9v10.5h12V9"/><path d="M10 19.5v-5h4v5"/></svg>
+        Set as home
+      </button>
+      <button class="btn small" id="workSave">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7.5" width="18" height="12.5" rx="2.5"/><path d="M8.5 7.5V6a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v1.5"/><path d="M3 13h18"/></svg>
+        Set as work
+      </button>
+    </div>
 
     <ol id="stepsList" class="steps" hidden></ol>
   </div>
@@ -101,18 +153,20 @@
   <aside class="card updates" id="updatesPanel" hidden>
     <header>
       <h2>Road updates</h2>
-      <button class="icon-btn" id="closeUpdates" title="Close">✕</button>
+      <button class="icon-btn" id="closeUpdates" title="Close">
+        <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
     </header>
     <p class="muted" id="updatesMeta"></p>
     <ul id="updatesList" class="updates-list"></ul>
     <footer class="muted small">
       TeslaNaviGeorgia © 2026 Jaba Macharashvili<br />
-      Map © OpenStreetMap contributors · Tiles OpenFreeMap · Terrain Mapzen / AWS · Routing OSRM · Search Photon<br />
+      Map © OpenStreetMap contributors · Tiles OpenFreeMap © OpenMapTiles · Terrain Mapzen / AWS · Routing OSRM · Search Photon<br />
       Not affiliated with Tesla, Inc.
     </footer>
   </aside>
 
-  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js" defer></script>
+  <script src="/vendor/qrcode-generator-2.0.4/qrcode.js" defer></script>
   <script src="/boot.js"></script>
 </body>
 </html>

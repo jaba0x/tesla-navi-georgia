@@ -14,6 +14,8 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
+    if (url.pathname === '/sw.js') return serviceWorker(request, env);
+
     if (!url.pathname.startsWith('/api/')) {
       return env.ASSETS.fetch(request);
     }
@@ -47,6 +49,18 @@ export default {
     }
   },
 };
+
+// GET /sw.js — the service worker (public/sw.js), stamped with this deployment's
+// id. Every deployment then changes the file, browsers install it, and it fetches a
+// fresh copy of the app; without the stamp a device would keep the old app.
+async function serviceWorker(request, env) {
+  const res = await env.ASSETS.fetch(request);
+  if (!res.ok) return res;
+  const version = (env.VERSION && env.VERSION.id) || 'dev';
+  return new Response((await res.text()).replace('__VERSION__', version), {
+    headers: { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache' },
+  });
+}
 
 // GET /api/route?from=lon,lat&to=lon,lat&bearing=deg
 async function route(url, ctx) {

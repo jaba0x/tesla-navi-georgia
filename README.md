@@ -133,4 +133,5 @@ Handy while developing:
 - `?miss=1` alongside `sim=1` drives straight past the first turn, to test re-routing
 - `?debug=1` shows GPS accuracy, distance off the route line and the re-route counters
 - `?gl1` forces the old-screen version on any browser
+- `?slow=1` pretends the connection is slow: the app starts without 3D relief and hill shading
 - `window.geodrive` in the console exposes the map and state
