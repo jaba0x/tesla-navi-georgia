@@ -6,7 +6,9 @@
 (function () {
   'use strict';
 
-  var CDN = 'https://cdn.jsdelivr.net/npm/maplibre-gl@';
+  // Served from this site (public/vendor) rather than a CDN: one connection fewer
+  // on a slow network, and the service worker can keep it on the device
+  var LIB = '/vendor/maplibre-gl-';
   var MODERN = '5.24.0';
   var LEGACY = '4.7.1';
 
@@ -35,6 +37,10 @@
 
   window.geodriveFail = fail;
 
+  // Name this site in the on-screen hints, whichever domain it is served from
+  var hostSpots = document.querySelectorAll('.site-host');
+  for (var i = 0; i < hostSpots.length; i++) hostSpots[i].textContent = location.host;
+
   window.addEventListener('error', function (e) {
     // Browsers report cross-origin script problems as a bare "Script error." with no
     // detail; those are usually harmless, so don't alarm the driver over them
@@ -49,7 +55,7 @@
   window.GEODRIVE_GL = (webgl2 && !forceLegacy) ? 2 : (webgl1 ? 1 : 0);
 
   if (!webgl2 && !webgl1) {
-    fail('This browser cannot draw maps', 'No WebGL support. Open tesla.jaba.ge/check.html to see the details.');
+    fail('This browser cannot draw maps', 'No WebGL support. Open ' + location.host + '/check.html to see the details.');
     return;
   }
 
@@ -57,7 +63,7 @@
 
   var css = document.createElement('link');
   css.rel = 'stylesheet';
-  css.href = CDN + version + '/dist/maplibre-gl.css';
+  css.href = LIB + version + '/maplibre-gl.css';
   document.head.appendChild(css);
 
   function load(src, onDone) {
@@ -69,8 +75,17 @@
     document.head.appendChild(s);
   }
 
-  load(CDN + version + '/dist/maplibre-gl.js', function () {
+  load(LIB + version + '/maplibre-gl.js', function () {
     if (!window.maplibregl) return fail('The map library did not start', version);
     load('/nav.js', function () { load('/app.js'); });
   });
+
+  // Keep the app, the map library and the map already seen on this device
+  // (sw.js), so the next start doesn't wait on a slow connection. Registered once
+  // the page has loaded, so it doesn't compete with the first start.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('/sw.js').catch(function () { /* the app works without it */ });
+    });
+  }
 })();

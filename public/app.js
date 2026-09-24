@@ -14,6 +14,15 @@
   const LITE = window.GEODRIVE_GL === 1;
   const CAMERA_MS = LITE ? 100 : 0; // how often the camera may be redrawn
 
+  // On a slow connection, or with data saver on, start without the 3D relief and
+  // the hill shading: both pull a stream of extra elevation tiles. The 3D button
+  // still turns them on, and the stored choice is left alone for faster days.
+  // Only Chromium browsers (the car, Android) report the connection; ?slow=1
+  // pretends it is slow, for testing.
+  const net = navigator.connection;
+  const SLOW_NET = /(\?|&)slow=1(&|$)/.test(location.search) ||
+    Boolean(net && (net.saveData || ['slow-2g', '2g', '3g'].includes(net.effectiveType)));
+
   const STYLES = {
     day: 'https://tiles.openfreemap.org/styles/liberty',
     night: 'https://tiles.openfreemap.org/styles/dark',
@@ -37,11 +46,14 @@
   const REROUTE_COOLDOWN_MS = 15000;
   const ARRIVE_METERS = 25;
   const SPEAK_AT = [800, 200, 45]; // metres before a turn
+  const CAMERA_WARN_METERS = 400;  // a speed camera is announced this far ahead…
+  const CAMERA_WARN_SECONDS = 20;  // …or this many seconds ahead at speed, if further
+  const CAMERA_NEAR_ROAD = 22;     // metres from our line within which a camera watches our road
 
   const $ = (id) => document.getElementById(id);
   const state = {
     theme: localGet('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day'),
-    view3d: LITE ? localGet('view3d') === 'on' : localGet('view3d') !== 'off',
+    view3d: LITE ? localGet('view3d') === 'on' : !SLOW_NET && localGet('view3d') !== 'off',
     voice: localGet('voice') !== 'off',
     position: null,     // { lon, lat, heading, speed, accuracy }
     follow: true,
@@ -55,6 +67,8 @@
     rerouteRun: 0,      // re-routes since we were last properly on the route
     rerouteGaveUp: false,
     spoken: new Set(),
+    alts: null,         // { routes, index }: the ways there to choose from before Start
+    cameras: [],        // speed cameras: [{ id, lon, lat, kmh, dir, kind }]
     updates: [],
     sim: null,
   };
@@ -100,7 +114,8 @@
       zoom: 12,
       pitch: state.view3d ? 45 : 0,
       maxPitch: 75,
-      attributionControl: { compact: true },
+      // No (i) on the map: the credits live in the badge in the corner (index.html)
+      attributionControl: false,
     });
   } catch (err) {
     if (window.geodriveFail) window.geodriveFail('The map could not start on this screen', String(err && err.message || err));
@@ -113,19 +128,74 @@
       window.geodriveFail('The map could not draw on this screen', message);
     }
   });
-  map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
-  map.on('style.load', () => { window.geodriveMapReady = true; addOverlays(); });
-  map.on('dragstart', () => { panToken++; setFollow(false); });
+  map.on('style.load', () => {
+    window.geodriveMapReady = true;
+    // The map is drawing, so whatever tripped before this point was not fatal:
+    // don't leave its panel over a working map
+    $('bootError').hidden = true;
+    addOverlays();
+  });
+  // The driver takes the camera: a finger that moves on the map, a second finger,
+  // or the wheel. This has to be caught on the raw input. The chase loop's jumpTo
+  // stops MapLibre's gesture handlers every frame, so a pinch or a wheel zoom
+  // never got far enough to announce itself and the map stuck under the fingers.
+  // A plain tap (to drop a pin) doesn't count. During a trip the camera comes
+  // back to the car once the map has been left alone for a while.
+  let recenterTimer = null;
+  function driverTookCamera() {
+    panToken++;
+    setFollow(false);
+    clearTimeout(recenterTimer);
+    recenterTimer = setTimeout(() => {
+      if (state.navigating && !state.follow) resumeFollow();
+    }, 12000);
+  }
+  const mapBox = map.getCanvasContainer();
+  const pointers = new Map();   // pointerId -> where it went down
+  mapBox.addEventListener('pointerdown', (e) => {
+    pointers.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pointers.size > 1) driverTookCamera();   // pinch, twist or tilt
+  });
+  mapBox.addEventListener('pointermove', (e) => {
+    const from = pointers.get(e.pointerId);
+    if (!from) return;
+    if (e.pointerType === 'mouse' && !e.buttons) { pointers.delete(e.pointerId); return; }
+    if (Math.hypot(e.clientX - from[0], e.clientY - from[1]) > 3) driverTookCamera();
+  });
+  for (const type of ['pointerup', 'pointercancel']) {
+    addEventListener(type, (e) => pointers.delete(e.pointerId));
+  }
+  mapBox.addEventListener('wheel', driverTookCamera, { passive: true });
+  // Double-tap zoom and the keyboard still arrive through MapLibre's own events
+  map.on('zoomstart', (e) => { if (e.originalEvent) driverTookCamera(); });
+  map.on('dragstart', driverTookCamera);
 
   function addOverlays() {
     add3D();
     addRouteLayers();
+    addCameraLayer();
     addUpdateLayers();
     if (state.nav) drawRoute();
+    showAlternatives();
   }
 
   function addRouteLayers() {
     if (map.getSource('route')) return;
+    const night = state.theme === 'night';
+
+    // The other ways there, before Start: grey, under the chosen one, each with its time
+    map.addSource('route-alts', { type: 'geojson', data: emptyFC() });
+    map.addLayer({
+      id: 'route-alt-casing', type: 'line', source: 'route-alts',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': night ? '#3d4650' : '#7d8894', 'line-width': lineWidth(13) },
+    });
+    map.addLayer({
+      id: 'route-alt-line', type: 'line', source: 'route-alts',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': night ? '#7a8591' : '#b9c2cc', 'line-width': lineWidth(8) },
+    });
+
     map.addSource('route-done', { type: 'geojson', data: emptyFC() });
     map.addSource('route', { type: 'geojson', data: emptyFC() });
     map.addSource('maneuvers', { type: 'geojson', data: emptyFC() });
@@ -166,11 +236,66 @@
         'circle-stroke-color': '#0b3d91', 'circle-stroke-width': 3,
       },
     });
+    // How long each of the other ways takes, over everything else
+    map.addLayer({
+      id: 'route-alt-label', type: 'symbol', source: 'route-alts',
+      layout: {
+        'symbol-placement': 'line-center', 'text-field': ['get', 'label'],
+        'text-font': ['Noto Sans Bold'], 'text-size': 17, 'text-allow-overlap': true,
+      },
+      paint: {
+        'text-color': night ? '#eef1f4' : '#14171a',
+        'text-halo-color': night ? '#1b1f24' : '#ffffff', 'text-halo-width': 2.5,
+      },
+    });
   }
 
   // Thicker lines as you zoom in, so the route reads well both on an overview and up close
   function lineWidth(base) {
     return ['interpolate', ['linear'], ['zoom'], 8, base * 0.45, 14, base * 0.8, 18, base * 1.4];
+  }
+
+  // Speed cameras: a small orange badge on the streets close up (a whole city of
+  // them is only clutter), upright in the 3D view too
+  function addCameraLayer() {
+    if (!map.hasImage('speed-camera')) map.addImage('speed-camera', cameraIcon(), { pixelRatio: 2 });
+    if (map.getSource('cameras')) return;
+    map.addSource('cameras', { type: 'geojson', data: camerasFC() });
+    map.addLayer({
+      id: 'cameras', type: 'symbol', source: 'cameras', minzoom: 13.5,
+      layout: {
+        'icon-image': 'speed-camera',
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 13.5, 0.6, 17, 1],
+        'icon-allow-overlap': true, 'icon-ignore-placement': true,
+      },
+    });
+  }
+
+  /** The badge, drawn once per map style: a white camera on an orange disc, 28 px. */
+  function cameraIcon() {
+    const s = 56;   // twice the size, for sharp edges on the car's screen
+    const c = document.createElement('canvas');
+    c.width = c.height = s;
+    const g = c.getContext('2d');
+    g.beginPath();
+    g.arc(s / 2, s / 2, s / 2 - 3, 0, Math.PI * 2);
+    g.fillStyle = '#e8590c';
+    g.fill();
+    g.lineWidth = 4;
+    g.strokeStyle = '#fff';
+    g.stroke();
+    // the camera body with its top, then the lens cut out of it
+    g.fillStyle = '#fff';
+    g.beginPath();
+    g.moveTo(15, 22); g.lineTo(21, 22); g.lineTo(24, 18); g.lineTo(32, 18); g.lineTo(35, 22);
+    g.lineTo(41, 22); g.lineTo(41, 38); g.lineTo(15, 38);
+    g.closePath();
+    g.fill();
+    g.beginPath();
+    g.arc(28, 30, 5.5, 0, Math.PI * 2);
+    g.fillStyle = '#e8590c';
+    g.fill();
+    return g.getImageData(0, 0, s, s);
   }
 
   function addUpdateLayers() {
@@ -271,6 +396,11 @@
   // so below this zoom the ground goes flat and the hill shading carries the relief.
   const TERRAIN_MAX_ZOOM = 15.2;
   function updateTerrain() {
+    // Nothing to raise until the style, and the elevation source with it, has
+    // loaded. In a car the first GPS fix can beat the style, and the camera loop
+    // it starts (with the zoomend its jumpTo fires) would otherwise call
+    // setTerrain early: MapLibre throws "Style is not done loading".
+    if (!map.getSource('dem')) return;
     const want = state.view3d && map.getZoom() < TERRAIN_MAX_ZOOM;
     const has = Boolean(map.getTerrain());
     if (want === has) return;
@@ -322,6 +452,8 @@
     state.position = pos;
 
     const progress = state.nav && state.navigating ? trackProgress() : null;
+    updateLimit();
+    checkCameras();
     // While driving a route, ride the road line instead of the raw GPS dot
     const shown = progress && progress.snapped ? progress.snapped : [pos.lon, pos.lat];
 
@@ -360,7 +492,7 @@
   // A chase camera, redrawn every frame and easing toward its target, so the map
   // glides and turns the way a car navigation screen does instead of stepping
   // once per GPS fix.
-  const cam = { lon: null, lat: null, bearing: 0, zoom: 15, pitch: 0 };
+  const cam = { lon: null, lat: null, bearing: 0, zoom: 15, pitch: 0, pad: 0 };
   const car = { lon: null, lat: null, bearing: 0 };
 
   // Zoom like a car navigation app: close in for turns, wider at speed.
@@ -439,18 +571,42 @@
     cam.bearing += angleDelta(cam.bearing, target.bearing) * 0.08 * ease;
     cam.zoom += (target.zoom - cam.zoom) * 0.05 * ease;
     cam.pitch += (target.pitch - cam.pitch) * 0.08 * ease;
+    cam.pad += (cardClearance() - cam.pad) * 0.1 * ease;
 
-    // flat ground close up, raised terrain from a distance (with a little hysteresis)
+    // flat ground close up, raised terrain from a distance (with a little hysteresis),
+    // once there is an elevation source to raise it from (see updateTerrain)
     const hasTerrain = !LITE && Boolean(map.getTerrain());
-    if (LITE) { /* no terrain here */ }
+    if (LITE || !map.getSource('dem')) { /* no terrain here, or not yet */ }
     else if (state.view3d && cam.zoom >= TERRAIN_MAX_ZOOM && hasTerrain) map.setTerrain(null);
     else if (state.view3d && cam.zoom < TERRAIN_MAX_ZOOM - 0.3 && !hasTerrain) {
       map.setTerrain({ source: 'dem', exaggeration: 1 });
     }
 
-    map.jumpTo({ center: [cam.lon, cam.lat], bearing: cam.bearing, zoom: cam.zoom, pitch: cam.pitch });
+    map.jumpTo({
+      center: [cam.lon, cam.lat], bearing: cam.bearing, zoom: cam.zoom, pitch: cam.pitch,
+      padding: { top: 0, right: 0, bottom: cam.pad, left: 0 },
+    });
   }
   requestAnimationFrame(frame);
+
+  /**
+   * Bottom padding that keeps the car above the turn card; 0 when the card is
+   * beside it. On narrower car screens the card reaches the middle of the screen,
+   * where the car is drawn, and in the tilted view the car sits low enough to go
+   * under it. Padding the bottom of the view lifts everything by half the padding.
+   */
+  function cardClearance() {
+    const panel = $('routePanel');
+    if (!state.navigating || panel.hidden || car.lon === null) return 0;
+    const card = panel.getBoundingClientRect();
+    const at = map.project([car.lon, car.lat]);
+    const half = meEl.offsetHeight / 2 + 12;   // the marker, and a little air
+    if (at.x + half < card.left || at.x - half > card.right) return 0;
+    // where the car would be drawn with no padding, and how far it has to rise
+    const unpadded = at.y + cam.pad / 2;
+    // capped, for the open trip details, which can cover most of the screen
+    return Math.min(innerHeight * 0.6, Math.max(0, 2 * (unpadded + half - card.top)));
+  }
 
   // Jump straight to the car — used when follow mode is switched back on
   /** Take the camera back from an animation and hand it to the follow loop. */
@@ -512,21 +668,34 @@
     // a road running that way made it pick roads the car was nowhere near when
     // the reported heading was stale, and the drawn route stopped matching the
     // streets. Worth revisiting once the debug overlay shows the heading is good.
+    // A new destination also asks for other ways there, to choose from before Start
+    const alternatives = preview ? '&alternatives=1' : '';
     try {
-      const res = await fetch(`/api/route?from=${origin.lon},${origin.lat}&to=${d.lon},${d.lat}`);
+      const res = await fetch(`/api/route?from=${origin.lon},${origin.lat}&to=${d.lon},${d.lat}${alternatives}`);
       const data = await res.json();
+      // A newer destination was picked while this route was on its way
+      if (state.destination !== d) return;
       if (!res.ok || data.code !== 'Ok' || !data.routes?.length) {
         toast(data.error || data.message || 'No route found');
         return;
       }
+      state.alts = preview && data.routes.length > 1 ? { routes: data.routes, index: 0 } : null;
       startNavigation(data.routes[0], preview);
     } catch {
       toast('Routing failed — check your connection');
     }
   }
 
+  /** What navigation needs from a route, with the speed cameras along it. */
+  function prepareRoute(route) {
+    const nav = N.prepare(route);
+    nav.cameras = routeCameras(nav);
+    nav.limits = null;   // asked for once guidance runs on it (loadLimits)
+    return nav;
+  }
+
   function startNavigation(route, preview) {
-    state.nav = N.prepare(route);
+    state.nav = prepareRoute(route);
     state.progress = null;
     state.spoken.clear();
     state.offRouteFixes = 0;
@@ -548,23 +717,73 @@
     if (preview) {
       // Show the whole trip and wait for Start, the way a navigation app does
       state.navigating = false;
+      tripChanged();
       panel.classList.remove('collapsed');
       panel.classList.add('preview');
+      showAlternatives();
       setFollow(false);
       fitToRoute();
     } else {
       panel.classList.remove('preview');
+      if (state.navigating) loadLimits(state.nav);
       cameraFollow(false);
     }
+  }
+
+  /** Switch the route preview to another of the ways there. */
+  function chooseRoute(i) {
+    const alts = state.alts;
+    if (!alts || state.navigating || i === alts.index || !alts.routes[i]) return;
+    alts.index = i;
+    state.nav = prepareRoute(alts.routes[i]);
+    state.progress = null;
+    drawRoute();
+    renderSteps();
+    updateBanner();
+    showAlternatives();
+  }
+
+  /** The other ways there: grey lines on the map, and a button for each in the card. */
+  function showAlternatives() {
+    const alts = state.navigating ? null : state.alts;
+    map.getSource('route-alts')?.setData(alts ? {
+      type: 'FeatureCollection',
+      features: alts.routes.map((r, i) => ({
+        type: 'Feature', geometry: r.geometry,
+        properties: { i, label: N.fmtDuration(r.duration) },
+      })).filter((f) => f.properties.i !== alts.index),
+    } : emptyFC());
+
+    const box = $('altRoutes');
+    box.innerHTML = '';
+    box.hidden = !alts;
+    if (!alts) return;
+    alts.routes.forEach((r, i) => {
+      const b = document.createElement('button');
+      b.className = `alt${i === alts.index ? ' selected' : ''}`;
+      b.innerHTML = '<b></b><span class="alt-sub"></span>';
+      b.querySelector('b').textContent = `${N.fmtDuration(r.duration)} · ${N.fmtDist(r.distance)}`;
+      // The road it mostly takes, which is what tells the ways apart
+      const via = (r.legs[0]?.summary || '').split(',')[0].trim();
+      b.querySelector('.alt-sub').textContent = via ? `via ${via}` : '';
+      b.onclick = () => chooseRoute(i);
+      box.appendChild(b);
+    });
   }
 
   /** Begin guidance: swoop down to the car, then hand over to the driving camera. */
   function beginGuidance() {
     if (!state.nav) return;
     state.navigating = true;
+    tripChanged();
+    addRecent(state.destination);
     const panel = $('routePanel');
     panel.classList.remove('preview');
     panel.classList.add('collapsed');
+    // The way is chosen: the others go
+    state.alts = null;
+    showAlternatives();
+    loadLimits(state.nav);
 
     if (state.position) trackProgress();
     updateBanner();
@@ -609,27 +828,37 @@
   function fitToRoute() {
     const b = new maplibregl.LngLatBounds();
     state.nav.coords.forEach((c) => b.extend(c));
+    // and the other ways there, so each can be seen and picked
+    for (const r of state.alts?.routes || []) r.geometry.coordinates.forEach((c) => b.extend(c));
     const panel = $('routePanel').getBoundingClientRect();
-    // In portrait the panel spans the bottom, so the room to leave is below the
-    // route rather than beside it
-    const portrait = innerHeight > innerWidth;
-    map.fitBounds(b, {
-      padding: portrait
-        ? { top: 180, bottom: panel.height + 40, left: 40, right: 110 }
-        : { top: 100, bottom: 60, right: 100, left: innerWidth > 900 ? panel.width + 40 : 40 },
-      maxZoom: 16, pitch: 0, bearing: 0,
-    });
+    // Keep the route, and the car at its start, out from under the route card:
+    // beside it when the screen has room for the route there, otherwise above it.
+    // A fixed "wider than 900 px" rule left the card over the car on narrower
+    // car screens.
+    const beside = innerWidth - panel.right >= 360;
+    const pad = beside
+      ? { top: 110, bottom: 60, right: 100, left: panel.right + 30 }
+      : { top: 110, bottom: innerHeight - panel.top + 30, left: 40, right: 100 };
+    // Never pad the whole map away, or fitBounds gives up and leaves the view as is
+    pad.bottom = Math.min(pad.bottom, innerHeight - pad.top - 120);
+    pad.left = Math.min(pad.left, innerWidth - pad.right - 160);
+    map.fitBounds(b, { padding: pad, maxZoom: 16, pitch: 0, bearing: 0 });
   }
 
   function endNavigation(arrived) {
     state.nav = null;
     state.navigating = false;
+    tripChanged();
     $('routePanel').classList.remove('preview');
     state.progress = null;
     state.offRouteFixes = 0;
     state.destination = null;
+    state.alts = null;
     stopSim();
     destMarker.remove();
+    showAlternatives();
+    updateLimit();
+    checkCameras();
     map.getSource('route')?.setData(emptyFC());
     map.getSource('route-done')?.setData(emptyFC());
     map.getSource('maneuvers')?.setData(emptyFC());
@@ -821,12 +1050,227 @@
     state.voice = !state.voice;
     localSet('voice', state.voice ? 'on' : 'off');
     $('voiceBtn').classList.toggle('active', state.voice);
-    $('voiceBtn').textContent = state.voice ? '🔊' : '🔇';
+    $('voiceBtn').classList.toggle('muted', !state.voice);
     if (state.voice) speak('Voice guidance on');
     else speechSynthesis?.cancel();
   };
   $('voiceBtn').classList.toggle('active', state.voice);
-  $('voiceBtn').textContent = state.voice ? '🔊' : '🔇';
+  $('voiceBtn').classList.toggle('muted', !state.voice);
+
+  // ---------------------------------------------------------------- speed limits
+  // Where OpenStreetMap has the signed limit for the road, a sign shows it while
+  // guidance runs. The Worker matches the route to the roads once per route.
+  async function loadLimits(nav) {
+    if (!nav || nav.limits) return;
+    nav.limits = [];   // asked for; stays empty if no answer comes
+    try {
+      const res = await fetch('/api/limits', { method: 'POST', body: N.encodeLine(nav.coords) });
+      if (!res.ok) return;
+      const data = await res.json();
+      // point numbers along the line -> metres from the start of the route
+      nav.limits = (data.limits || []).map(([from, to, kmh]) => [nav.cum[from] ?? 0, nav.cum[to] ?? nav.total, kmh]);
+      if (state.nav === nav) updateLimit();
+    } catch { /* offline: no sign on this route */ }
+  }
+
+  function limitAt(nav, metres) {
+    for (const [from, to, kmh] of nav.limits || []) {
+      if (metres >= from && metres <= to) return kmh;
+    }
+    return null;
+  }
+
+  function kmhNow() {
+    return Math.max(0, (state.position && state.position.speed) || 0) * 3.6;
+  }
+
+  function updateLimit() {
+    const on = state.navigating && state.nav && state.progress;
+    const kmh = on ? limitAt(state.nav, state.progress.traveled) : null;
+    const sign = $('limitSign');
+    sign.hidden = !kmh;
+    if (!kmh) return;
+    $('limitValue').textContent = kmh;
+    sign.classList.toggle('over', kmhNow() > kmh + 5);
+  }
+
+  // ---------------------------------------------------------------- speed cameras
+  // Speed cameras from OpenStreetMap. With a route, those on it are found once
+  // (within a few metres of the line, watching our way of travel), and each is
+  // announced as it comes up. Without one, the road straight ahead is watched.
+  async function loadCameras() {
+    try {
+      const res = await fetch('/api/cameras');
+      const data = await res.json();
+      state.cameras = (data.cameras || []).filter((c) => Number.isFinite(c.lon) && Number.isFinite(c.lat));
+    } catch {
+      return;   // no list: no badges and no warnings, everything else works
+    }
+    map.getSource('cameras')?.setData(camerasFC());
+    if (state.nav) state.nav.cameras = routeCameras(state.nav);
+  }
+
+  function camerasFC() {
+    return {
+      type: 'FeatureCollection',
+      features: state.cameras.map((c) => ({
+        type: 'Feature', geometry: { type: 'Point', coordinates: [c.lon, c.lat] }, properties: { id: c.id },
+      })),
+    };
+  }
+
+  /** Does a camera watch traffic going this way? One with no direction watches both. */
+  function watches(camera, bearing) {
+    return !camera.dir || camera.dir.some((d) => Math.abs(angleDelta(bearing, d)) <= 50);
+  }
+
+  /** The cameras on a route, each with how far along the route it stands. */
+  function routeCameras(nav) {
+    if (!state.cameras.length) return [];
+    let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity;
+    for (const [lon, lat] of nav.coords) {
+      west = Math.min(west, lon); east = Math.max(east, lon);
+      south = Math.min(south, lat); north = Math.max(north, lat);
+    }
+    const pad = 0.001;   // ~100 m: only cameras inside the route's box get a closer look
+    const found = [];
+    for (const c of state.cameras) {
+      if (c.lon < west - pad || c.lon > east + pad || c.lat < south - pad || c.lat > north + pad) continue;
+      const m = N.project([c.lon, c.lat], nav.coords, nav.cum, 0);
+      if (m.distance > CAMERA_NEAR_ROAD) continue;
+      const along = N.bearing(N.pointAt(nav, m.offset - 15), N.pointAt(nav, m.offset + 15));
+      if (watches(c, along)) found.push({ ...c, offset: m.offset });
+    }
+    return found.sort((a, b) => a.offset - b.offset);
+  }
+
+  function warnDistance() {
+    const speed = (state.position && state.position.speed) || 0;
+    return Math.min(1000, Math.max(CAMERA_WARN_METERS, speed * CAMERA_WARN_SECONDS));
+  }
+
+  function checkCameras() {
+    const p = state.progress;
+    if (state.navigating && state.nav && p) {
+      // the first camera not yet passed, once it is close enough
+      const next = (state.nav.cameras || []).find((c) => c.offset > p.traveled - 10);
+      const distance = next ? next.offset - p.traveled : Infinity;
+      showCamera(distance <= warnDistance() ? next : null, distance);
+      return;
+    }
+    const ahead = cameraAhead();
+    showCamera(ahead && ahead.camera, ahead && ahead.distance);
+  }
+
+  /** No route: the nearest camera on the road straight ahead, watching our way. */
+  function cameraAhead() {
+    const pos = state.position;
+    if (!pos || state.navigating || !Number.isFinite(pos.heading) || !(pos.speed > 3)) return null;
+    const here = [pos.lon, pos.lat];
+    const reach = warnDistance();
+    let best = null;
+    for (const c of state.cameras) {
+      if (Math.abs(c.lat - pos.lat) > 0.01) continue;   // ~1 km: not near
+      const distance = N.haversine(here, [c.lon, c.lat]);
+      if (distance > reach || (best && distance > best.distance)) continue;
+      const off = Math.abs(angleDelta(pos.heading, N.bearing(here, [c.lon, c.lat])));
+      const aside = distance * Math.sin((off * Math.PI) / 180);
+      if (off > 40 || aside > CAMERA_NEAR_ROAD || !watches(c, pos.heading)) continue;
+      best = { camera: c, distance };
+    }
+    return best;
+  }
+
+  const chimed = new Map();   // camera id -> when it last chimed
+  function showCamera(camera, distance) {
+    const box = $('camAlert');
+    box.hidden = !camera;
+    if (!camera) return;
+    $('camLimit').hidden = !camera.kmh;
+    $('camLimit').textContent = camera.kmh || '';
+    $('camDist').textContent = N.fmtDist(distance);
+    box.classList.toggle('over', Boolean(camera.kmh) && kmhNow() > camera.kmh);
+    // Once per camera: a warning that flickers with the GPS must not chime again
+    if (!(Date.now() - (chimed.get(camera.id) || 0) < 5 * 60 * 1000)) {
+      chimed.set(camera.id, Date.now());
+      chime();
+    }
+  }
+
+  const CAMERA_NAMES = { speed: 'Speed camera', average: 'Average speed check', red_light: 'Red light camera' };
+  function showCameraPopup(id) {
+    const c = state.cameras.find((x) => x.id === id);
+    if (!c) return;
+    openCard([c.lon, c.lat], mapCard({
+      icon: CAMERA_ICON, tint: '#e8590c',
+      title: CAMERA_NAMES[c.kind] || CAMERA_NAMES.speed,
+      sub: c.kmh ? `Limit ${c.kmh} km/h` : 'Limit not recorded',
+      note: 'From OpenStreetMap',
+    }));
+  }
+
+  // A short two-note chime for a camera, when voice guidance is on. A page may
+  // only make sound after the first tap on it, so the sound is readied then.
+  let audio = null;
+  addEventListener('pointerdown', () => {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    try {
+      if (!audio && Ctx) audio = new Ctx();
+      else if (audio && audio.state === 'suspended') audio.resume();
+    } catch { /* no sound on this screen */ }
+  }, true);
+
+  function chime() {
+    if (!state.voice || !audio) return;
+    try {
+      const t = audio.currentTime + 0.02;
+      for (const [freq, at] of [[988, 0], [1319, 0.17]]) {
+        const osc = audio.createOscillator();
+        const gain = audio.createGain();
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, t + at);
+        gain.gain.exponentialRampToValueAtTime(0.3, t + at + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.24);
+        osc.connect(gain);
+        gain.connect(audio.destination);
+        osc.start(t + at);
+        osc.stop(t + at + 0.26);
+      }
+    } catch { /* no sound */ }
+  }
+
+  // ---------------------------------------------------------------- screen on
+  // A phone switches its screen off after a short while, and a page on a locked
+  // phone gets no GPS fixes, so guidance would freeze mid-trip. Hold a screen wake
+  // lock while a trip is running. The browser drops the lock whenever the page is
+  // hidden, so it is taken again when the page comes back.
+  let wakeLock = null;
+  let wakeLockPending = false;
+
+  async function syncWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    const want = state.navigating && !document.hidden;
+    try {
+      if (want && !wakeLock && !wakeLockPending) {
+        wakeLockPending = true;
+        const lock = await navigator.wakeLock.request('screen');
+        lock.addEventListener('release', () => { if (wakeLock === lock) wakeLock = null; });
+        wakeLock = lock;
+      } else if (!want && wakeLock) {
+        const lock = wakeLock;
+        wakeLock = null;
+        await lock.release();
+      }
+    } catch {
+      // Refused, for example in battery saver: the screen sleeps as it did before
+    } finally {
+      wakeLockPending = false;
+    }
+    // The trip may have ended while the request was pending
+    if (wakeLock && !(state.navigating && !document.hidden)) syncWakeLock();
+  }
+
+  document.addEventListener('visibilitychange', syncWakeLock);
 
   // ---------------------------------------------------------------- map taps
   map.on('click', (e) => {
@@ -836,17 +1280,134 @@
       if (u) showUpdatePopup(u);
       return;
     }
+    const camera = map.getLayer('cameras') && map.queryRenderedFeatures(e.point, { layers: ['cameras'] })[0];
+    if (camera) {
+      showCameraPopup(camera.properties.id);
+      return;
+    }
+    // Before Start, a tap on one of the other ways picks it. A finger is wide, so
+    // look around the tap; where the chosen route runs over the same road, it wins.
+    if (state.alts && !state.navigating && map.getLayer('route-alt-casing')) {
+      const { x, y } = e.point;
+      const box = [[x - 14, y - 14], [x + 14, y + 14]];
+      const alt = map.queryRenderedFeatures(box, { layers: ['route-alt-casing'] })[0];
+      if (alt && !map.queryRenderedFeatures(box, { layers: ['route-casing'] }).length) {
+        chooseRoute(alt.properties.i);
+        return;
+      }
+    }
     const { lng, lat } = e.lngLat;
-    const el = document.createElement('div');
-    el.innerHTML = `<div class="popup-title">Dropped pin</div>
-      <div class="small muted">${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
-      <button class="popup-btn">Drive here</button>`;
-    const popup = new maplibregl.Popup({ closeButton: true }).setLngLat(e.lngLat).setDOMContent(el).addTo(map);
-    el.querySelector('button').onclick = () => {
-      popup.remove();
-      setDestination({ lon: lng, lat, name: 'Dropped pin' });
-    };
+    const place = { lon: lng, lat, name: 'Dropped pin' };
+    const card = mapCard({
+      icon: PIN_ICON, title: place.name, sub: `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+      note: distanceNote(place), drive: () => driveToPin(place),
+    });
+    const popup = openCard([lng, lat], card);
+    // Then name the spot: the place there, or its address
+    whatIsHere(lat, lng).then((found) => {
+      if (!found || !popup.isOpen()) return;
+      card.querySelector('.mc-title').textContent = found.title;
+      card.querySelector('.mc-sub').textContent = found.sub;
+      if (found.exact) place.name = found.title;
+    });
   });
+
+  function driveToPin(place) {
+    input.value = place.name;
+    $('clearSearch').hidden = false;
+    setDestination({ ...place });
+  }
+
+  const PIN_ICON = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21.5s-7-6-7-11.6a7 7 0 0 1 14 0c0 5.6-7 11.6-7 11.6z"/><circle cx="12" cy="9.8" r="2.6"/></svg>';
+  const DRIVE_ICON = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 19 20l-7-3.6L5 20z"/></svg>';
+  const CAMERA_ICON = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8H7l1.6-2.2h6.8L17 8h2.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-8A1.5 1.5 0 0 1 4.5 8z"/><circle cx="12" cy="13.2" r="3.3"/></svg>';
+  const WARNING_ICON = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.3 4.3 2.7 17.5a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4M12 17h.01"/></svg>';
+
+  /**
+   * The card that opens on the map for a dropped pin, a road update or a camera:
+   * an icon, a title with a line under it, a note, and a "Drive here" button when
+   * `drive` is given. Its look follows the day / night theme (style.css).
+   */
+  function mapCard({ icon, tint, title, sub, note, drive }) {
+    const el = document.createElement('div');
+    el.className = 'map-card';
+    el.innerHTML = `<div class="mc-head"><span class="mc-icon">${icon}</span>` +
+      '<div class="mc-text"><div class="mc-title"></div><div class="mc-sub"></div></div></div>' +
+      '<div class="mc-note"></div>';
+    if (tint) el.querySelector('.mc-icon').style.setProperty('--tint', tint);
+    el.querySelector('.mc-title').textContent = title;
+    el.querySelector('.mc-sub').textContent = sub || '';
+    el.querySelector('.mc-note').textContent = note || '';
+    if (drive) {
+      const button = document.createElement('button');
+      button.className = 'popup-btn';
+      button.innerHTML = `${DRIVE_ICON}<span>Drive here</span>`;
+      el.appendChild(button);
+      el.drive = drive;
+    }
+    return el;
+  }
+
+  function openCard(lngLat, card) {
+    const popup = new maplibregl.Popup({ focusAfterOpen: false, maxWidth: '360px', offset: 10 })
+      .setLngLat(lngLat).setDOMContent(card).addTo(map);
+    const button = card.querySelector('.popup-btn');
+    if (button) {
+      onDeliberateTap(button, () => {
+        popup.remove();
+        card.drive();
+      });
+    }
+    return popup;
+  }
+
+  /** "2.4 km from you", when we know where you are. */
+  function distanceNote(place) {
+    const p = state.position;
+    if (!p) return '';
+    const d = N.haversine([p.lon, p.lat], [place.lon, place.lat]);
+    return d < 30 ? 'You are here' : `${N.fmtDist(d)} from you`;
+  }
+
+  /**
+   * What is at a spot: the nearest place there, or else its address. Statues,
+   * plaques and the like are passed over: they are what a finger lands on in a
+   * city centre, and no name for a destination. `exact` when the answer is right
+   * where the finger went, so it can name the destination too.
+   */
+  const MINOR = /^(historic|man_made|natural)=|^tourism=(artwork|viewpoint|information)$/;
+  async function whatIsHere(lat, lon) {
+    try {
+      const res = await fetch(`/api/reverse?lat=${lat}&lon=${lon}`);
+      const found = res.ok ? (await res.json()).features || [] : [];
+      const f = found.find((x) => !MINOR.test(`${x.properties.osm_key}=${x.properties.osm_value}`)) || found[0];
+      if (!f) return null;
+      const p = f.properties || {};
+      const street = [p.street, p.housenumber].filter(Boolean).join(' ');
+      const area = [p.district, p.city || p.town || p.village].filter((v, i, a) => v && a.indexOf(v) === i).join(', ');
+      const title = p.name || street;
+      if (!title) return null;
+      const away = N.haversine([lon, lat], f.geometry.coordinates);
+      if (away > 150) return { title: 'Dropped pin', sub: `Near ${title}`, exact: false };
+      return {
+        title,
+        sub: [p.name && street, area].filter(Boolean).join(' · '),
+        exact: true,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A popup opens right under the finger. A touch screen that reports the same
+   * tap twice would press its button on the driver's behalf, so a press within
+   * the first moments after it appears doesn't count.
+   */
+  function onDeliberateTap(button, action) {
+    const shown = Date.now();
+    button.onclick = () => { if (Date.now() - shown > 400) action(); };
+  }
   map.on('mouseenter', 'updates-dot', () => (map.getCanvas().style.cursor = 'pointer'));
   map.on('mouseleave', 'updates-dot', () => (map.getCanvas().style.cursor = ''));
 
@@ -859,6 +1420,8 @@
   input.addEventListener('input', () => {
     $('clearSearch').hidden = !input.value;
     clearTimeout(searchTimer);
+    // Emptied: drop any search still on its way and offer the saved places again
+    if (!input.value.trim()) { searchSeq++; showShortcuts(); return; }
     searchTimer = setTimeout(runSearch, 350);
   });
   input.addEventListener('keydown', (e) => {
@@ -961,6 +1524,173 @@
     input.blur();
   }
 
+  // ---------------------------------------------------------------- trip memory
+  // The page can be reloaded mid-trip: a car browser may reload it after the
+  // reversing camera, and a phone drops a background tab when it needs the memory.
+  // Remember the running trip, and pick it up again on the next load.
+  const TRIP_KEY = 'trip';
+  const TRIP_MAX_AGE = 2 * 60 * 60 * 1000;   // a trip left alone this long is over
+  // A demo drive (?sim=1) is never remembered, nor added to the recent places
+  const SIMULATED = new URLSearchParams(location.search).get('sim') === '1';
+
+  /** A trip started, stopped or went back to preview. */
+  function tripChanged() {
+    syncWakeLock();
+    rememberTrip();
+    showPlaces();
+  }
+
+  function rememberTrip() {
+    if (SIMULATED) return;
+    const d = state.destination;
+    if (state.navigating && d) {
+      localSet(TRIP_KEY, JSON.stringify({ lon: d.lon, lat: d.lat, name: d.name, at: Date.now() }));
+    } else {
+      localDel(TRIP_KEY);
+    }
+  }
+  // Keep the time fresh while driving, so only a trip that was left alone expires
+  setInterval(() => { if (state.navigating) rememberTrip(); }, 60 * 1000);
+
+  async function resumeTrip() {
+    let trip = null;
+    try { trip = JSON.parse(localGet(TRIP_KEY)); } catch { /* unreadable: start afresh */ }
+    if (!validPlace(trip) || !(Date.now() - trip.at < TRIP_MAX_AGE)) {
+      localDel(TRIP_KEY);
+      return;
+    }
+    const name = String(trip.name || 'Destination').slice(0, 80);
+    input.value = name;
+    $('clearSearch').hidden = false;
+    toast(`Resuming your trip to ${name}`);
+    // Route from where the car really is, not from the middle of the map
+    await waitForPosition(15000);
+    if (state.destination || input.value !== name) {
+      localDel(TRIP_KEY);   // the driver picked or cleared something in the meantime
+      return;
+    }
+    const dest = { lon: trip.lon, lat: trip.lat, name };
+    await setDestination(dest);
+    // Not if the driver picked somewhere else while the route was on its way
+    if (state.nav && state.destination === dest) beginGuidance();
+  }
+
+  function waitForPosition(ms) {
+    return new Promise((resolve) => {
+      const until = Date.now() + ms;
+      const timer = setInterval(() => {
+        if (state.position || Date.now() > until) { clearInterval(timer); resolve(); }
+      }, 250);
+    });
+  }
+
+  // ---------------------------------------------------------------- places
+  // Home, Work and the last few destinations, one tap away. They live in this
+  // browser only, so everyone who opens the site keeps their own.
+  const RECENT_MAX = 5;
+
+  function validPlace(p) {
+    return Boolean(p) && Number.isFinite(p.lon) && Number.isFinite(p.lat);
+  }
+
+  function readPlace(kind) {
+    try {
+      const p = JSON.parse(localGet(kind));
+      return validPlace(p) ? p : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function readRecent() {
+    try {
+      const list = JSON.parse(localGet('recent'));
+      return Array.isArray(list) ? list.filter(validPlace) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function addRecent(d) {
+    if (!d || SIMULATED) return;
+    const near = (p) => p && N.haversine([p.lon, p.lat], [d.lon, d.lat]) < 100;
+    if (near(readPlace('home')) || near(readPlace('work'))) return;   // already one tap away
+    const list = readRecent().filter((p) => !near(p));
+    list.unshift({ lon: d.lon, lat: d.lat, name: d.name });
+    localSet('recent', JSON.stringify(list.slice(0, RECENT_MAX)));
+  }
+
+  /** One tap: route to a saved place and start guidance straight away. */
+  async function driveTo(place) {
+    input.value = place.name;
+    $('clearSearch').hidden = false;
+    closeSearch(true);
+    const dest = { lon: place.lon, lat: place.lat, name: place.name };
+    await setDestination(dest);
+    if (state.nav && state.destination === dest) beginGuidance();
+  }
+
+  const PLACE_LABELS = { home: 'Home', work: 'Work' };
+  const CLOCK_ICON = '<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
+
+  /** The list under an empty search box: Home, Work, then the recent places. */
+  function showShortcuts() {
+    const items = [];
+    for (const kind of ['home', 'work']) {
+      const p = readPlace(kind);
+      // Same icon as the button beside the search box
+      const icon = $(`${kind}Chip`).querySelector('svg').outerHTML;
+      if (p) items.push({ icon, title: PLACE_LABELS[kind], sub: p.name, place: { ...p, name: PLACE_LABELS[kind] } });
+    }
+    for (const p of readRecent()) items.push({ icon: CLOCK_ICON, title: p.name, sub: '', place: p });
+
+    results.innerHTML = '';
+    if (!items.length) { results.hidden = true; return; }
+    for (const it of items) {
+      const li = document.createElement('li');
+      li.tabIndex = 0;
+      li.className = 'shortcut';
+      li.innerHTML = `<span class="r-icon">${it.icon}</span><div><div class="r-name"></div></div>`;
+      li.querySelector('.r-name').textContent = it.title;
+      if (it.sub && it.sub !== it.place.name) {
+        li.querySelector('.r-name').insertAdjacentHTML('afterend', '<div class="r-sub"></div>');
+        li.querySelector('.r-sub').textContent = it.sub;
+      }
+      li.onclick = () => driveTo(it.place);
+      results.appendChild(li);
+    }
+    results.hidden = false;
+  }
+
+  input.addEventListener('focus', () => { if (!input.value.trim()) showShortcuts(); });
+  // The shortcuts belong to an empty box, and go away with the keyboard
+  input.addEventListener('blur', () => { if (!input.value.trim()) results.hidden = true; });
+  // Tapping the list must not blur the box first, or the list vanishes under the finger
+  results.addEventListener('mousedown', (e) => e.preventDefault());
+
+  /** Home / Work buttons under the search box, hidden while a route is on screen. */
+  function showPlaces() {
+    $('places').hidden = Boolean(state.nav);
+    for (const kind of ['home', 'work']) $(`${kind}Chip`).classList.toggle('unset', !readPlace(kind));
+  }
+
+  for (const kind of ['home', 'work']) {
+    $(`${kind}Chip`).onclick = () => {
+      const p = readPlace(kind);
+      if (p) driveTo({ ...p, name: PLACE_LABELS[kind] });
+      else toast(`Find your ${kind} in search or on the map, then tap “Set as ${kind}” under the route`);
+    };
+    // In the route preview: keep this destination as Home or Work
+    $(`${kind}Save`).onclick = () => {
+      const d = state.destination;
+      if (!d) return;
+      localSet(kind, JSON.stringify({ lon: d.lon, lat: d.lat, name: d.name }));
+      toast(`Saved as ${kind}: ${d.name}`);
+      showPlaces();
+    };
+  }
+  showPlaces();
+
   // ---------------------------------------------------------------- road updates
   async function loadUpdates() {
     try {
@@ -998,18 +1728,13 @@
   }
 
   function showUpdatePopup(u) {
-    const el = document.createElement('div');
-    el.innerHTML = `<div class="popup-title"></div><div class="p-desc"></div>
-      <div class="small muted p-src"></div><button class="popup-btn">Drive here</button>`;
-    el.querySelector('.popup-title').textContent = u.title + (u.example ? ' (sample)' : '');
-    el.querySelector('.p-desc').textContent = u.description || '';
-    el.querySelector('.p-src').textContent = [u.source, u.updated && new Date(u.updated).toLocaleDateString()]
-      .filter(Boolean).join(' · ');
-    const popup = new maplibregl.Popup().setLngLat([u.lon, u.lat]).setDOMContent(el).addTo(map);
-    el.querySelector('button').onclick = () => {
-      popup.remove();
-      setDestination({ lon: u.lon, lat: u.lat, name: u.title });
-    };
+    openCard([u.lon, u.lat], mapCard({
+      icon: WARNING_ICON, tint: UPDATE_COLORS[u.type] || UPDATE_COLORS.info,
+      title: u.title + (u.example ? ' (sample)' : ''),
+      sub: [u.source, u.updated && new Date(u.updated).toLocaleDateString()].filter(Boolean).join(' · '),
+      note: u.description,
+      drive: () => setDestination({ lon: u.lon, lat: u.lat, name: u.title }),
+    }));
   }
 
   function updatesFC() {
@@ -1170,8 +1895,21 @@
     toastTimer = setTimeout(() => (t.hidden = true), 3500);
   }
 
+  // The badge in the corner: just the logo; a tap shows who made this and where
+  // the map comes from. It starts open, so the sources are named when the map
+  // first appears, and folds away again by itself.
+  let brandTimer = null;
+  function showBrand(open, ms = 8000) {
+    $('brand').setAttribute('aria-expanded', String(open));
+    clearTimeout(brandTimer);
+    if (open) brandTimer = setTimeout(() => showBrand(false), ms);
+  }
+  $('brand').onclick = () => showBrand($('brand').getAttribute('aria-expanded') !== 'true');
+  showBrand(true, 5000);
+
   function localGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
   function localSet(k, v) { try { localStorage.setItem(k, v); } catch { /* ignore */ } }
+  function localDel(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } }
 
   // Deep link: /?to=lon,lat&name=Place[&sim=1]
   function openDeepLink() {
@@ -1184,16 +1922,21 @@
       setDestination({ lon: to[0], lat: to[1], name }).then(() => {
         if (qs.get('sim') === '1' && state.nav) { beginGuidance(); startSim(); }
       });
+      return true;
     }
+    return false;
   }
 
   if (LITE) {
     setTimeout(() => toast('Simple mode: this screen gets the lighter map'), 1500);
+  } else if (SLOW_NET && localGet('view3d') !== 'off') {
+    setTimeout(() => toast('Slow connection: 3D is off so the map loads faster. Tap 3D to turn it on.'), 1500);
   }
 
   loadUpdates();
+  loadCameras();
   // 'style.load', not 'load': with 3D terrain switched on, 'load' never fires
-  map.once('style.load', openDeepLink);
+  map.once('style.load', () => { if (!openDeepLink()) resumeTrip(); });
 
   // Handy for debugging from the browser console
   window.geodrive = { map, state, startSim, stopSim, checkInbox, beginGuidance };

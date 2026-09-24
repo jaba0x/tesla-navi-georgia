@@ -7,6 +7,9 @@
   --danger: #d1242f;
   --shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
   --radius: 16px;
+  --accent-soft: rgba(31, 111, 235, 0.12);   /* behind a switched-on control */
+  --press: rgba(0, 0, 0, 0.06);              /* under a finger or a hovering mouse */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
 body.night {
   --bg: #1b1f24;
@@ -15,6 +18,8 @@ body.night {
   --line: #2d333b;
   --accent: #4c9aff;
   --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  --accent-soft: rgba(76, 154, 255, 0.18);
+  --press: rgba(255, 255, 255, 0.07);
 }
 
 * { box-sizing: border-box; }
@@ -41,8 +46,22 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .muted { color: var(--muted); }
 .small { font-size: 13px; }
 
-/* Search */
-.search { top: 88px; left: 16px; width: min(460px, calc(100vw - 104px)); }
+/* Line icons, drawn in the text colour of their button */
+.i {
+  width: 24px; height: 24px; flex: none; display: block;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.i .fill { fill: currentColor; stroke: none; }
+
+/* Top bar: search, with Home / Work beside it */
+.topbar {
+  /* above the controls: on a phone the open result list runs over them */
+  position: absolute; top: 16px; left: 16px; right: 96px; z-index: 6;
+  display: flex; align-items: flex-start; gap: 10px;
+  pointer-events: none;   /* the empty stretch to the right leaves the map draggable */
+}
+.topbar > * { pointer-events: auto; }
+.search { position: relative; flex: 0 1 460px; min-width: 0; }
 .search input {
   width: 100%;
   height: 64px;
@@ -57,23 +76,66 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .search input::-webkit-search-cancel-button { display: none; }
 .icon-btn {
   border: 0; background: transparent; width: 48px; height: 48px;
-  border-radius: 12px; font-size: 20px; color: var(--muted);
+  border-radius: 12px; color: var(--muted);
+  display: grid; place-items: center;
+  transition: background-color 150ms ease;
 }
+.icon-btn .i { width: 22px; height: 22px; }
 .search .icon-btn { position: absolute; right: 8px; top: 8px; }
 .results { list-style: none; margin: 0; padding: 4px 0 8px; border-top: 1px solid var(--line); max-height: 60vh; overflow: auto; }
 .results li { padding: 14px 20px; cursor: pointer; }
 .results li:hover, .results li:focus { background: var(--line); }
 .results .r-name { font-weight: 600; }
 .results .r-sub { color: var(--muted); font-size: 15px; margin-top: 2px; }
+.results li.shortcut { display: flex; align-items: center; gap: 14px; }
+.r-icon { color: var(--muted); }
+.r-icon .i { width: 22px; height: 22px; }
 
-/* Round controls */
-.controls { position: absolute; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 12px; z-index: 5; }
-.round-btn {
-  width: 64px; height: 64px; border-radius: 50%; border: 0;
-  background: var(--bg); color: var(--fg); box-shadow: var(--shadow); font-size: 26px;
+/* Home / Work, the same height as the search box */
+.places { display: flex; gap: 10px; flex: none; }
+.place-chip {
+  height: 64px; padding: 0 20px 0 16px; border: 0; border-radius: var(--radius);
+  background: var(--bg); color: var(--fg); box-shadow: var(--shadow);
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 17px; font-weight: 600; white-space: nowrap;
+  transition: transform 160ms var(--ease-out);
 }
-.round-btn.active { background: var(--accent); color: #fff; }
-#view3dBtn { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+.place-chip .i { color: var(--accent); }
+/* Not saved yet: greyed, and a tap explains how to set it */
+.place-chip.unset { color: var(--muted); font-weight: 500; }
+.place-chip.unset .i { color: var(--muted); }
+
+/* Map controls: one column, each switch lights up in the accent colour when on */
+.controls {
+  position: absolute; top: 16px; right: 16px; z-index: 5;
+  display: flex; flex-direction: column;
+  background: var(--bg); border-radius: 20px; box-shadow: var(--shadow); overflow: hidden;
+}
+.ctrl-btn {
+  width: 64px; height: 64px; border: 0; background: transparent; color: var(--fg);
+  display: grid; place-items: center;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+.ctrl-btn + .ctrl-btn { border-top: 1px solid var(--line); }
+.ctrl-btn .i { width: 26px; height: 26px; transition: transform 160ms var(--ease-out); }
+.ctrl-btn.active { color: var(--accent); background: var(--accent-soft); }
+.ctrl-3d { font-size: 19px; font-weight: 700; letter-spacing: -0.5px; transition: transform 160ms var(--ease-out); }
+#voiceBtn .off, #voiceBtn.muted .on { display: none; }
+#voiceBtn.muted .off { display: block; }
+
+/* Press feedback: the button shrinks a touch under the finger, so the tap is felt */
+.ctrl-btn:active { background: var(--press); }
+.ctrl-btn:active .i, .ctrl-btn:active .ctrl-3d { transform: scale(0.88); }
+.place-chip:active, .btn:active { transform: scale(0.97); }
+.icon-btn:active { background: var(--press); }
+@media (hover: hover) and (pointer: fine) {
+  .ctrl-btn:hover:not(.active), .icon-btn:hover, .btn:not(.primary):not(.danger):hover { background: var(--press); }
+}
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.ctrl-btn:focus-visible { outline-offset: -4px; }   /* the column clips anything outside */
+@media (prefers-reduced-motion: reduce) {
+  .ctrl-btn:active .i, .ctrl-btn:active .ctrl-3d, .place-chip:active, .btn:active { transform: none; }
+}
 
 /* Start-up error */
 .boot-error {
@@ -85,18 +147,21 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .boot-error-title { font-size: 22px; font-weight: 700; margin-bottom: 10px; }
 .boot-error-detail { color: var(--danger); word-break: break-word; margin-bottom: 10px; }
 
-/* Brand / credit badge */
+/* Brand and credits badge, tucked into the bottom-right corner */
 .brand {
-  position: absolute; left: 16px; top: 16px; z-index: 4;
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 16px 8px 8px; border-radius: 999px;
+  position: absolute; right: 8px; bottom: 8px; z-index: 4;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 14px 6px 6px; border: 0; border-radius: 22px;
   background: var(--bg); box-shadow: var(--shadow);
-  white-space: nowrap; pointer-events: none;
+  white-space: nowrap; text-align: left;
 }
-.brand .logo { width: 40px; height: 40px; flex: none; }
-.brand-text { display: flex; flex-direction: column; line-height: 1.15; }
-.brand b { color: var(--fg); font-weight: 700; font-size: 17px; letter-spacing: -0.2px; }
-.brand-sub { color: var(--muted); font-size: 12px; }
+/* Folded: just the logo, in a round button */
+.brand[aria-expanded="false"] { padding: 6px; border-radius: 50%; }
+.brand[aria-expanded="false"] .brand-text { display: none; }
+.brand .logo { width: 32px; height: 32px; flex: none; }
+.brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+.brand b { color: var(--fg); font-weight: 700; font-size: 13px; letter-spacing: -0.1px; }
+.brand-sub { color: var(--muted); font-size: 11px; }
 
 /* Send-from-phone panel */
 .phone {
@@ -174,9 +239,17 @@ body.night .route-meta span:first-child { color: #3fb950; }
 .route.preview .preview-only { display: block; }
 .route.preview .drive-only { display: none; }
 .route.preview .next-dist { font-size: 26px; }
+.save-row { gap: 10px; margin-top: 10px; }
+.route.preview .save-row { display: flex; }
+.btn.small {
+  height: 42px; font-size: 15px; font-weight: 500;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+}
+.btn.small .i { width: 18px; height: 18px; color: var(--accent); }
 .btn {
   flex: 1; height: 52px; border-radius: 12px; border: 1px solid var(--line);
   background: transparent; font-weight: 600;
+  transition: transform 160ms var(--ease-out), background-color 150ms ease;
 }
 .btn.danger { color: #fff; background: var(--danger); border-color: var(--danger); }
 .btn.primary { color: #fff; background: var(--accent); border-color: var(--accent); }
@@ -187,6 +260,54 @@ body.night .route-meta span:first-child { color: #3fb950; }
 .steps .s-arrow svg { width: 24px; height: 24px; }
 .steps .s-text { overflow: hidden; }
 .steps .s-dist { margin-left: auto; color: var(--muted); white-space: nowrap; }
+
+/* Other ways there, side by side before Start; the chosen one is lit */
+.alts { gap: 8px; margin: 0 0 12px; }
+.route.preview .alts { display: flex; }
+.alt {
+  flex: 1 1 0; min-width: 0; padding: 8px 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: transparent; text-align: left;
+  display: flex; flex-direction: column; gap: 2px;
+  transition: transform 160ms var(--ease-out), background-color 150ms ease, border-color 150ms ease;
+}
+.alt b { font-size: 17px; white-space: nowrap; }
+.alt-sub { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.alt.selected { border-color: var(--accent); background: var(--accent-soft); }
+.alt:active { transform: scale(0.97); }
+
+/* While driving, under the search box: the speed limit sign, and the camera
+   warning beside it. Neither takes taps, so the map stays draggable there. */
+.drive-info {
+  position: absolute; top: 92px; left: 16px; z-index: 5;
+  display: flex; align-items: center; gap: 10px; pointer-events: none;
+}
+.limit-sign {
+  width: 58px; height: 58px; border-radius: 50%; border: 6px solid #d1242f;
+  background: #fff; color: #111; box-shadow: var(--shadow);
+  display: grid; place-items: center;
+  font-size: 22px; font-weight: 800; letter-spacing: -0.5px; line-height: 1;
+}
+/* More than 5 km/h over it */
+.limit-sign.over { background: #d1242f; color: #fff; border-color: #fff; }
+.cam-alert {
+  height: 52px; padding: 0 18px 0 14px; border-radius: 26px;
+  background: var(--bg); color: var(--fg); box-shadow: var(--shadow);
+  display: flex; align-items: center; gap: 10px;
+  font-size: 19px; font-weight: 700; white-space: nowrap;
+  animation: cam-in 220ms var(--ease-out);
+}
+.cam-alert .i { color: #e8590c; }
+.cam-limit {
+  width: 34px; height: 34px; border-radius: 50%; border: 3px solid #d1242f;
+  background: #fff; color: #111; display: grid; place-items: center;
+  font-size: 14px; font-weight: 800; letter-spacing: -0.3px;
+}
+/* Faster than the camera allows */
+.cam-alert.over { background: #d1242f; color: #fff; }
+.cam-alert.over .i { color: #fff; }
+.cam-alert.over .cam-limit { border-color: #fff; }
+@keyframes cam-in { from { opacity: 0; transform: translateY(-8px) scale(0.96); } }
+@media (prefers-reduced-motion: reduce) { .cam-alert { animation: none; } }
 
 /* Updates panel */
 .updates { top: 16px; right: 96px; bottom: 16px; width: min(400px, calc(100vw - 112px)); padding: 16px; display: flex; flex-direction: column; }
@@ -200,10 +321,55 @@ body.night .route-meta span:first-child { color: #3fb950; }
 .u-desc { font-size: 15px; color: var(--muted); margin-top: 2px; }
 .badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 6px; background: #bf8700; color: #fff; margin-left: 6px; vertical-align: middle; }
 
-/* Map popups */
-.maplibregl-popup-content { font-size: 16px; border-radius: 12px; padding: 14px 16px; color: #14171a; }
-.popup-title { font-weight: 700; margin-bottom: 4px; }
-.popup-btn { margin-top: 10px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #1f6feb; color: #fff; font-weight: 600; }
+/* Map cards (a dropped pin, a road update, a camera), in the app's own card look
+   and day / night colours. #map outranks the map library's stylesheet, which
+   loads after this one and would otherwise win. */
+#map .maplibregl-popup-content {
+  padding: 16px; border-radius: var(--radius);
+  background: var(--bg); color: var(--fg); box-shadow: var(--shadow);
+  font-size: 16px;
+}
+#map .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+#map .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+#map .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: var(--bg); }
+#map .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+#map .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+#map .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: var(--bg); }
+#map .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--bg); }
+#map .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--bg); }
+#map .maplibregl-popup-close-button {
+  top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 10px;
+  font-size: 24px; line-height: 1; color: var(--muted);
+  transition: background-color 150ms ease;
+}
+#map .maplibregl-popup-close-button:hover, #map .maplibregl-popup-close-button:active { background: var(--press); }
+
+.map-card { min-width: 250px; }
+.mc-head { display: flex; align-items: center; gap: 12px; padding-right: 32px; }
+/* The kind of card at a glance, tinted: accent for a pin, orange for a camera,
+   the update's own colour for a road update */
+.mc-icon {
+  --tint: var(--accent);
+  flex: none; width: 44px; height: 44px; border-radius: 13px;
+  display: grid; place-items: center;
+  color: var(--tint);
+  background: var(--accent-soft);   /* screens too old for color-mix */
+  background: color-mix(in srgb, var(--tint) 15%, transparent);
+}
+.mc-text { min-width: 0; }
+.mc-title { font-size: 17px; font-weight: 700; line-height: 1.25; overflow-wrap: anywhere; }
+.mc-sub { margin-top: 3px; font-size: 14px; color: var(--muted); line-height: 1.3; }
+.mc-sub:empty, .mc-note:empty { display: none; }
+.mc-note { margin-top: 12px; font-size: 15px; color: var(--muted); line-height: 1.4; }
+.popup-btn {
+  margin-top: 14px; width: 100%; height: 50px; border: 0; border-radius: 12px;
+  background: var(--accent); color: #fff; font-size: 17px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: transform 160ms var(--ease-out), filter 150ms ease;
+}
+.popup-btn .i { width: 20px; height: 20px; }
+.popup-btn:active { transform: scale(0.97); filter: brightness(0.95); }
+@media (prefers-reduced-motion: reduce) { .popup-btn:active { transform: none; } }
 
 /* My-location marker: the car seen from above, turning with you.
    Drawn here rather than loaded as an image so it stays sharp at any zoom and
@@ -218,9 +384,29 @@ body.night .route-meta span:first-child { color: #3fb950; }
 /* Parked: dim it slightly so a moving car reads as the live one */
 .me:not(.moving) .me-car { opacity: 0.82; }
 
+/* Phones: the search row takes the full width and the controls start below it.
+   Home / Work shrink to their icons, and step aside while you type. */
 @media (max-width: 640px) {
   body { font-size: 16px; }
-  .updates { right: 16px; left: 16px; width: auto; top: 96px; }
+  .topbar { right: 16px; gap: 8px; }
+  .topbar:focus-within .places { display: none; }
+  .search { flex: 1 1 auto; }
+  /* 52 px keeps the column clear of the route preview panel on a phone */
+  .search input { height: 52px; font-size: 17px; padding: 0 44px 0 16px; }
+  .search .icon-btn { top: 2px; right: 2px; }
+  .places { gap: 8px; }
+  .place-chip { width: 52px; height: 52px; padding: 0; justify-content: center; }
+  .place-chip span { display: none; }
+  .controls { top: 78px; border-radius: 18px; }
+  .ctrl-btn { width: 52px; height: 52px; }
+  .ctrl-btn .i { width: 24px; height: 24px; }
+  .ctrl-3d { font-size: 17px; }
+  .phone { top: 78px; left: 16px; right: 80px; width: auto; }
+  .updates { right: 16px; left: 16px; width: auto; top: 78px; }
+  .drive-info { top: 78px; gap: 8px; }
+  .limit-sign { width: 50px; height: 50px; border-width: 5px; font-size: 19px; }
+  .cam-alert { height: 46px; padding: 0 14px 0 12px; font-size: 17px; gap: 8px; }
+  .alt b { font-size: 16px; }
 }
 
 /* Portrait car screens — the 17" display in a Model S or X is 1200 x 1920.
@@ -230,12 +416,18 @@ body.night .route-meta span:first-child { color: #3fb950; }
 @media (orientation: portrait) and (min-width: 700px) {
   body { font-size: 20px; }
 
-  .search { left: 16px; right: 104px; width: auto; top: 96px; }
+  .topbar { right: 104px; gap: 12px; }
+  .search { flex: 1 1 auto; }
   .search input { height: 72px; font-size: 22px; }
+  .search .icon-btn { top: 12px; }
   .results li { padding: 16px 20px; }
+  .place-chip { height: 72px; font-size: 20px; padding: 0 24px 0 20px; }
+  .place-chip .i { width: 28px; height: 28px; }
 
-  .round-btn { width: 72px; height: 72px; font-size: 30px; }
-  #view3dBtn { font-size: 22px; }
+  .controls { border-radius: 22px; }
+  .ctrl-btn { width: 72px; height: 72px; }
+  .ctrl-btn .i { width: 30px; height: 30px; }
+  .ctrl-3d { font-size: 22px; }
 
   .route { left: 16px; right: 16px; width: auto; max-height: 46vh; padding: 18px; }
   .route.collapsed { width: auto; padding: 14px 18px; }
@@ -251,12 +443,22 @@ body.night .route-meta span:first-child { color: #3fb950; }
   .then { font-size: 19px; }
   .route-meta { font-size: 20px; }
   .btn { height: 60px; }
+  .btn.small { height: 52px; font-size: 18px; }
+  .btn.small .i { width: 22px; height: 22px; }
   .steps li { font-size: 18px; padding: 13px 4px; }
 
-  .phone { left: 16px; right: 104px; width: auto; top: 96px; }
+  .phone { left: 16px; right: 104px; width: auto; top: 100px; }
   #pairQr { width: 220px; height: 220px; }
   .paircode { font-size: 54px; }
-  .updates { left: 16px; right: 104px; width: auto; top: 96px; bottom: 16px; }
+  .updates { left: 16px; right: 104px; width: auto; top: 100px; bottom: 16px; }
+
+  .drive-info { top: 104px; gap: 12px; }
+  .limit-sign { width: 72px; height: 72px; border-width: 7px; font-size: 27px; }
+  .cam-alert { height: 62px; padding: 0 22px 0 16px; border-radius: 31px; font-size: 23px; }
+  .cam-limit { width: 40px; height: 40px; font-size: 16px; }
+  .alt { padding: 10px 14px; }
+  .alt b { font-size: 20px; }
+  .alt-sub { font-size: 15px; }
 
   .toast { font-size: 19px; bottom: 32px; }
 }

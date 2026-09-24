@@ -5,7 +5,8 @@
   "description": "Big-screen map with routing and road updates for drivers in Georgia",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "cameras": "node scripts/cameras.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
