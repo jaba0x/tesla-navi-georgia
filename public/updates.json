@@ -1,39 +1,5 @@
 {
-  "updated": "2026-09-22T12:00:00+04:00",
-  "note": "Edit this file to publish road updates. Types: closure, works, hazard, charger, info. Remove \"example\": true for real entries.",
-  "items": [
-    {
-      "id": "sample-jvari",
-      "type": "hazard",
-      "title": "Jvari Pass — check before you go",
-      "description": "Sample entry. In winter the Gudauri–Stepantsminda road can close for snow and avalanche risk.",
-      "lat": 42.5096,
-      "lon": 44.4637,
-      "source": "Example",
-      "updated": "2026-09-22",
-      "example": true
-    },
-    {
-      "id": "sample-rustaveli",
-      "type": "works",
-      "title": "Rustaveli Ave — lane works",
-      "description": "Sample entry showing how road works appear on the map.",
-      "lat": 41.7002,
-      "lon": 44.7926,
-      "source": "Example",
-      "updated": "2026-09-22",
-      "example": true
-    },
-    {
-      "id": "sample-charger",
-      "type": "charger",
-      "title": "EV charger (example)",
-      "description": "Sample entry showing how charging stations appear on the map.",
-      "lat": 41.7240,
-      "lon": 44.7650,
-      "source": "Example",
-      "updated": "2026-09-22",
-      "example": true
-    }
-  ]
+  "updated": "2026-09-24T21:00:00+04:00",
+  "note": "Edit this file to publish road updates. Types: closure, works, hazard, charger, info. Each item needs id, type, title, description, lat, lon, source, updated.",
+  "items": []
 }

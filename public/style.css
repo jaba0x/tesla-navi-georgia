@@ -205,21 +205,17 @@ body.night .route-meta span:first-child { color: #3fb950; }
 .popup-title { font-weight: 700; margin-bottom: 4px; }
 .popup-btn { margin-top: 10px; width: 100%; height: 44px; border: 0; border-radius: 10px; background: #1f6feb; color: #fff; font-weight: 600; }
 
-/* My-location marker: a dot when parked, a pointer while driving */
-.me { position: relative; width: 34px; height: 34px; }
-.me-dot {
-  position: absolute; inset: 4px;
-  border-radius: 50%; background: var(--accent); border: 4px solid #fff;
-  box-shadow: 0 0 0 6px rgba(31, 111, 235, 0.22);
-}
-.me-arrow { display: none; }
-.me.moving .me-dot { display: none; }
-.me.moving .me-arrow {
-  display: block; position: absolute; inset: 0;
-  clip-path: polygon(50% 0%, 100% 100%, 50% 78%, 0% 100%);
-  background: var(--accent);
-  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 4px rgba(0,0,0,0.35));
-}
+/* My-location marker: the car seen from above, turning with you.
+   Drawn here rather than loaded as an image so it stays sharp at any zoom and
+   costs nothing to fetch on a slow car connection. */
+.me { position: relative; width: 32px; height: 57px; }
+.me-car { display: block; width: 100%; height: 100%; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.55)); }
+.car-body { fill: #e31937; stroke: #fff; stroke-width: 1.7; stroke-linejoin: round; }
+.car-roof { fill: #b30d27; }
+.car-glass { fill: #0b0f14; opacity: 0.82; }
+.car-mirror { fill: #e31937; stroke: #fff; stroke-width: 1.2; stroke-linejoin: round; }
+/* Parked: dim it slightly so a moving car reads as the live one */
+.me:not(.moving) .me-car { opacity: 0.82; }
 
 @media (max-width: 640px) {
   body { font-size: 16px; }
