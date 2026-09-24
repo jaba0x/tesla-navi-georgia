@@ -110,7 +110,9 @@ docs/       screenshots for this file
 ```
 
 Shared map links are resolved server-side (`/api/resolve`) because short links have to be
-followed. Only Google, Apple and Waze hosts are allowed.
+followed. Only Google, Apple and Waze hosts are allowed. Links shared from the Google Maps
+phone app name the place instead of giving coordinates; those are looked up on Google's
+embed page.
 
 ## Old car screens
 

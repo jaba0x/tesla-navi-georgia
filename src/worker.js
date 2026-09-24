@@ -238,6 +238,14 @@ async function resolveLink(url) {
     const found = extractPlace(current);
     if (found) return json(found);
 
+    // A Google link that names the place rather than giving its coordinates
+    const named = googlePlaceQuery(current);
+    if (named) {
+      const place = await googlePlace(named);
+      if (place) return json(place);
+      break;   // Google itself does not know it
+    }
+
     const res = await fetch(current, {
       redirect: 'manual',
       headers: { 'User-Agent': UA, 'Accept-Language': 'en' },
@@ -250,8 +258,9 @@ async function resolveLink(url) {
       }
       continue;
     }
-    if (res.ok) {
-      // Some links only reveal the place inside the page itself
+    // Some links only reveal the place inside the page itself. Not Google's: its
+    // pages open on a default view and find the place with scripts afterwards.
+    if (res.ok && !isGoogle(current)) {
       const body = (await res.text()).slice(0, 300000);
       const found2 = extractPlace(body);
       if (found2) return json(found2);
@@ -261,11 +270,78 @@ async function resolveLink(url) {
   throw httpError(404, 'No location found in that link');
 }
 
+function isGoogle(link) {
+  return /(^|\.)google\.com$/.test(new URL(link).hostname);
+}
+
+// Links shared from the Google Maps phone app name the place (?q=name, address
+// &ftid=…), as do /maps/place/Name and ?cid= links. Returns what to ask for.
+function googlePlaceQuery(link) {
+  if (!isGoogle(link)) return null;
+  const u = new URL(link);
+  const p = u.searchParams;
+  const title = (p.get('q') || p.get('query') || pathName(u.pathname)).trim();
+
+  const fid = (p.get('ftid') || (link.match(/!1s(0x[0-9a-f]+:0x[0-9a-f]+)/i) || [])[1] || '')
+    .match(/^0x[0-9a-f]{1,16}:(0x[0-9a-f]{1,16})$/i);
+  const cid = fid ? BigInt(fid[1]).toString() : ((p.get('cid') || '').match(/^\d{1,20}$/) || [])[0];
+  if (cid) return { pb: `!1m3!3m2!1m1!4s${cid}`, title };   // that very place
+  if (title) return { pb: `!1m2!2m1!1s${encodeURIComponent(title).replace(/!/g, '%21')}`, title };   // Google's search
+  return null;
+}
+
+function pathName(path) {
+  const m = path.match(/\/maps\/(?:place|search)\/([^/@]+)/);
+  if (!m) return '';
+  try {
+    return decodeURIComponent(m[1].replace(/\+/g, ' '));
+  } catch {
+    return '';
+  }
+}
+
+// Google's embed page answers a place query in its first 3 KB, coordinates included
+async function googlePlace({ pb, title }) {
+  const res = await fetch(`https://www.google.com/maps/embed?origin=mfe&pb=${pb}`, {
+    headers: { 'User-Agent': UA, 'Accept-Language': 'en' },
+  });
+  if (!res.ok) return null;
+  const page = (await res.text()).slice(0, 100000);
+  title = title.split(',')[0].trim();
+
+  // One place: ["0x…:0x…","name, address",[lat,lon],"cid"],"name"
+  let m = page.match(/"0x[0-9a-f]+:0x[0-9a-f]+","(?:[^"\\]|\\.)*",\[(-?\d+\.\d+),(-?\d+\.\d+)\],"\d+"\],"((?:[^"\\]|\\.)*)"/i);
+  if (m) return checkedPlace(m[1], m[2], jsonText(m[3]) || title);
+  // A search: the first result, in degrees × 10⁷
+  m = page.match(/\[\["\d+","\d+"\],"[^"]*",null,\[(-?\d+),(-?\d+)\]/);
+  if (m) return checkedPlace(m[1] / 1e7, m[2] / 1e7, title);
+  // Otherwise the view Google opens on, unless it is the whole world (nothing found)
+  m = page.match(/\[\[\[(\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\]/);
+  if (m && Number(m[1]) < 50000) return checkedPlace(m[3], m[2], title);
+  return null;
+}
+
+function checkedPlace(lat, lon, name) {
+  lat = Number(lat);
+  lon = Number(lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+  if (lat === 0 && lon === 0) return null;
+  return { lat, lon, name: String(name || '').slice(0, 80) };
+}
+
+function jsonText(s) {
+  try {
+    return JSON.parse(`"${s}"`);
+  } catch {
+    return '';
+  }
+}
+
 function extractPlace(text) {
   const patterns = [
     /!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/,        // Google place data
     /@(-?\d{1,2}\.\d+),(-?\d{1,3}\.\d+)/,             // Google map centre
-    /[?&](?:q|ll|daddr|destination|center)=(-?\d{1,2}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)/i,
+    /[?&](?:q|query|ll|daddr|destination|center|coordinate)=(-?\d{1,2}\.\d+)(?:,|%2C)(-?\d{1,3}\.\d+)/i,
   ];
   for (const re of patterns) {
     const m = text.match(re);
