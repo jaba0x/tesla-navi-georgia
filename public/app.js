@@ -26,6 +26,7 @@
   };
 
   const NAV_PITCH = 58;
+  const IDLE_ZOOM = 14.5;          // what the map comes back to when a trip ends
   const CAR_OFFSET = 0.18; // how far below the middle of the screen the car sits
   const OFF_ROUTE_METERS = 45;
   const ACCURACY_SLACK_MAX = 25;   // car GPS can claim 200 m of error; don't believe all of it
@@ -343,7 +344,7 @@
     const here = state.progress?.snapped || [pos.lon, pos.lat];
     const bearing = drivingBearing();
     const navigating = Boolean(state.nav && state.navigating && state.progress);
-    const zoom = navigating ? navZoom() : Math.max(map.getZoom(), 15);
+    const zoom = navigating ? navZoom() : Math.max(map.getZoom(), IDLE_ZOOM);
 
     let center = here;
     if (navigating && bearing !== null) {
@@ -353,7 +354,9 @@
       lon: center[0], lat: center[1],
       bearing: bearing === null ? cam.bearing : bearing,
       zoom,
-      pitch: state.view3d ? (navigating ? NAV_PITCH : Math.max(map.getPitch(), 45)) : 0,
+      // Off a route, hold whatever tilt the map has. Forcing a minimum here put
+      // the camera back on its nose the moment a trip ended.
+      pitch: state.view3d ? (navigating ? NAV_PITCH : map.getPitch()) : 0,
       car: here,
       carBearing: bearing,
     };
@@ -561,6 +564,30 @@
     $('searchInput').value = '';
     $('clearSearch').hidden = true;
     if (arrived) speak('You have arrived at your destination');
+    cameraOverview();
+  }
+
+  /** Come back out of the driving view: flat, north up, and zoomed back out. */
+  function cameraOverview() {
+    const pos = state.position;
+    const center = pos ? [pos.lon, pos.lat] : map.getCenter().toArray();
+
+    // Stand the chase loop down for the flight, or it fights the animation
+    state.follow = false;
+    map.easeTo({
+      center, zoom: IDLE_ZOOM, bearing: 0, pitch: 0,
+      duration: LITE ? 600 : 1100,
+      essential: true,
+    });
+    map.once('moveend', () => {
+      if (state.nav) return;          // a new trip started mid-flight
+      Object.assign(cam, {
+        lon: map.getCenter().lng, lat: map.getCenter().lat,
+        bearing: map.getBearing(), zoom: map.getZoom(), pitch: map.getPitch(),
+      });
+      state.follow = true;
+      $('followBtn').classList.add('active');
+    });
   }
   // Tap the turn bar to show or hide the trip details
   $('navSummary').onclick = () => {
