@@ -4,3 +4,9 @@ node_modules/
 .DS_Store
 wrangler.dev.jsonc
 .adduser.sql
+
+# local agent tooling, not part of this project
+.agents/
+.claude/
+.cursor/
+skills-lock.json
