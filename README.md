@@ -142,7 +142,10 @@ public/     index.html, app.js (map + navigation), nav.js (route maths, arrows),
 src/        worker.js (the API and the link resolver), accounts.js (sign-in,
             sessions, saved places), http.js
 tools/      adduser.mjs, brand.js
-test/       nav.test.js, auth.test.js — plain `node test/<file>`, no dependencies
+test/       nav.test.js, auth.test.js — plain `node test/<file>`, no dependencies.
+            camera.test.js drives real MapLibre in headless Chromium to check
+            where the car lands on screen; it skips unless you install
+            playwright and maplibre-gl
 docs/       screenshots for this file
 ```
 

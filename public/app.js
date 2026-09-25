@@ -27,10 +27,12 @@
 
   const NAV_PITCH = 58;
   const IDLE_ZOOM = 14.5;          // what the map comes back to when a trip ends
-  const CAR_OFFSET = 0.18; // how far below the middle of the screen the car sits
+  const CAR_SCREEN_Y = 0.72;  // where down the screen the car sits, 0 top, 1 bottom
+  const CAR_CARD_GAP = 56;    // clearance to keep between the car and the turn card
   const OFF_ROUTE_METERS = 45;
   const ACCURACY_SLACK_MAX = 60;   // believe some of the car's accuracy figure, not all of it
-  const OFF_ROUTE_FIXES = 4;       // fixes in a row, all drifting further, before we believe it
+  const OFF_ROUTE_FIXES = 3;       // fixes in a row before we believe we left the route
+  const OFF_ROUTE_MS = 5000;       // and this long, so one bad fix cannot trigger it
   const MAX_REROUTES = 3;          // then stop, rather than re-route in circles
   const BACKSTEP_METERS = 25;      // smaller than this and it's jitter, not a correction
   const STEP_PASSED_METERS = 10;   // hold the instruction until the turn is behind us
@@ -51,7 +53,8 @@
     progress: null,     // { traveled, stepIndex, toNext, remaining, eta }
     lastReroute: 0,
     offRouteFixes: 0,
-    offRouteDist: 0,    // last measured distance from the line, to spot real drift
+    offRouteDist: 0,    // last measured distance from the line
+    offRouteSince: 0,   // when we first went off it, so a spike cannot trigger a re-route
     rerouteRun: 0,      // re-routes since we were last properly on the route
     rerouteGaveUp: false,
     spoken: new Set(),
@@ -376,16 +379,43 @@
     return 16.8;
   }
 
-  // How far ahead of the car to aim, so the car sits in the lower part of the
-  // screen and most of the view is the road to come. Worked out from the screen
-  // height rather than a fixed number of metres: on the tall portrait screen in
-  // a Model S a fixed distance left the car stranded in the middle with half the
-  // display showing road already driven.
-  function lookAhead(zoom) {
-    const lat = state.position ? state.position.lat : map.getCenter().lat;
-    const metresPerPixel = (156543.03392 * Math.cos((lat * Math.PI) / 180)) / 2 ** zoom;
-    return Math.max(60, Math.min(340, CAR_OFFSET * innerHeight * metresPerPixel));
+  /**
+   * Keep the car low on screen with camera padding rather than by aiming at a
+   * point some number of metres ahead. Converting metres to pixels ignores the
+   * tilt: on a map pitched at 58 degrees the ground compresses towards the
+   * horizon, so the same distance ahead pushed the car far lower than intended,
+   * down among the turn card and the toast. Padding is applied after the
+   * projection, so MapLibre puts the car exactly where we ask at any pitch,
+   * zoom and screen shape.
+   *
+   * MapLibre centres on the padded box, so a top inset of P renders the centre
+   * point at (P + height) / 2. Solving that for the fraction we want gives
+   * P = height * (2f - 1).
+   */
+  function navPadding() {
+    let y = innerHeight * CAR_SCREEN_Y;
+
+    // On a short browser window the turn card rises to meet the car. Measure it
+    // rather than assume: if it sits under the middle of the screen, keep the
+    // car clear of it. A wide screen puts the card off to the left and this
+    // does nothing.
+    const panel = $('routePanel');
+    if (panel && !panel.hidden) {
+      const box = panel.getBoundingClientRect();
+      const middle = innerWidth / 2;
+      if (box.width && box.left < middle + 40 && box.right > middle - 40) {
+        y = Math.min(y, box.top - CAR_CARD_GAP);
+      }
+    }
+
+    const fraction = Math.max(0.5, y / innerHeight);
+    return {
+      top: Math.max(0, Math.round(innerHeight * (2 * fraction - 1))),
+      bottom: 0, left: 0, right: 0,
+    };
   }
+
+  const NO_PADDING = { top: 0, bottom: 0, left: 0, right: 0 };
 
   function cameraTarget() {
     const pos = state.position;
@@ -395,12 +425,9 @@
     const navigating = Boolean(state.nav && state.navigating && state.progress);
     const zoom = navigating ? navZoom() : Math.max(map.getZoom(), IDLE_ZOOM);
 
-    let center = here;
-    if (navigating && bearing !== null) {
-      center = N.pointAt(state.nav, state.progress.traveled + lookAhead(zoom));
-    }
     return {
-      lon: center[0], lat: center[1],
+      lon: here[0], lat: here[1],
+      padding: navigating ? navPadding() : NO_PADDING,
       bearing: bearing === null ? cam.bearing : bearing,
       zoom,
       // Off a route, hold whatever tilt the map has. Forcing a minimum here put
@@ -450,7 +477,7 @@
       map.setTerrain({ source: 'dem', exaggeration: 1 });
     }
 
-    map.jumpTo({ center: [cam.lon, cam.lat], bearing: cam.bearing, zoom: cam.zoom, pitch: cam.pitch });
+    map.jumpTo({ center: [cam.lon, cam.lat], bearing: cam.bearing, zoom: cam.zoom, pitch: cam.pitch, padding: target.padding });
   }
   requestAnimationFrame(frame);
 
@@ -490,7 +517,7 @@
     if (instant || cam.lon === null) {
       Object.assign(cam, { lon: target.lon, lat: target.lat, bearing: target.bearing, zoom: target.zoom, pitch: target.pitch });
       Object.assign(car, { lon: target.car[0], lat: target.car[1], bearing: target.carBearing ?? 0 });
-      map.jumpTo({ center: [cam.lon, cam.lat], bearing: cam.bearing, zoom: cam.zoom, pitch: cam.pitch });
+      map.jumpTo({ center: [cam.lon, cam.lat], bearing: cam.bearing, zoom: cam.zoom, pitch: cam.pitch, padding: target.padding });
     }
   }
 
@@ -534,6 +561,7 @@
     state.spoken.clear();
     state.offRouteFixes = 0;
     state.offRouteDist = 0;
+    state.offRouteSince = 0;
     state.lastReroute = Date.now();
     if (preview) {                 // a fresh destination, not a re-route
       state.rerouteRun = 0;
@@ -585,6 +613,7 @@
       zoom: target.zoom,
       bearing: target.bearing,
       pitch: target.pitch,
+      padding: target.padding,
       duration: LITE ? 900 : 1900,
       curve: 1.5,   // dip out and back in, like a camera swooping down
       essential: true,
@@ -651,7 +680,7 @@
     // Stand the chase loop down for the flight, or it fights the animation
     state.follow = false;
     const ms = LITE ? 600 : 1100;
-    map.easeTo({ center, zoom: IDLE_ZOOM, bearing: 0, pitch: 0, duration: ms, essential: true });
+    map.easeTo({ center, zoom: IDLE_ZOOM, bearing: 0, pitch: 0, padding: NO_PADDING, duration: ms, essential: true });
     afterFlight(ms);
   }
   // Tap the turn bar to show or hide the trip details
@@ -676,18 +705,24 @@
     // registered at all, so the old line stayed on screen the whole way.
     const slack = Math.min(state.position.accuracy || 0, ACCURACY_SLACK_MAX);
     if (match.distance > OFF_ROUTE_METERS + slack) {
-      // Count it only while we keep drifting further off. A position that is
-      // merely coarse sits at a steady distance, and re-routing on that put the
-      // car in a loop of fresh routes it had never been on.
-      const diverging = match.distance > state.offRouteDist + 5;
-      state.offRouteFixes = diverging ? state.offRouteFixes + 1 : 0;
+      // Off the line for a stretch of time, rather than getting further off with
+      // every fix. Demanding that it keep growing sounded careful and was wrong:
+      // once you are driving down a different street the distance stops rising
+      // smoothly, a single flat fix reset the counter, and the re-route never
+      // came at all. A spike cannot last five seconds, so time does the job the
+      // divergence test was meant to do.
+      const now = Date.now();
+      if (!state.offRouteSince) state.offRouteSince = now;
+      state.offRouteFixes++;
       state.offRouteDist = match.distance;
 
       if (state.offRouteFixes >= OFF_ROUTE_FIXES &&
+          now - state.offRouteSince >= OFF_ROUTE_MS &&
           state.rerouteRun < MAX_REROUTES &&
-          Date.now() - state.lastReroute > REROUTE_COOLDOWN_MS) {
+          now - state.lastReroute > REROUTE_COOLDOWN_MS) {
         state.rerouteRun++;
-        state.lastReroute = Date.now();
+        state.lastReroute = now;
+        state.offRouteSince = 0;
         state.offRouteFixes = 0;
         toast('Re-routing…');
         speak('Re-routing');
@@ -702,6 +737,7 @@
     }
     state.offRouteFixes = 0;
     state.offRouteDist = 0;
+    state.offRouteSince = 0;
     state.rerouteRun = 0;          // properly on the line again
     state.rerouteGaveUp = false;
 

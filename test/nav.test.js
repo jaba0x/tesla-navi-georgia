@@ -30,24 +30,27 @@ const route = {
 const nav = N.prepare(route);
 
 // ---- constants mirrored from app.js ----------------------------------------
-const OFF_ROUTE_METERS = 45, ACCURACY_SLACK_MAX = 60, OFF_ROUTE_FIXES = 4;
+const OFF_ROUTE_METERS = 45, ACCURACY_SLACK_MAX = 60, OFF_ROUTE_FIXES = 3, OFF_ROUTE_MS = 5000;
 const MAX_REROUTES = 3, STEP_PASSED_METERS = 10;
 
-/** The off-route half of trackProgress, so the state machine itself is tested. */
-function drive(points, accuracy) {
-  const s = { offRouteFixes: 0, offRouteDist: 0, rerouteRun: 0, reroutes: 0 };
+/** The off-route half of trackProgress, so the state machine itself is tested.
+ *  `tick` is the gap between GPS fixes, because the rule is now partly about time. */
+function drive(points, accuracy, tick = 1000) {
+  const s = { offRouteFixes: 0, offRouteSince: 0, rerouteRun: 0, reroutes: 0 };
+  let now = 0;
   for (const p of points) {
+    now += tick;
     const match = N.project(p, nav.coords, nav.cum, 0);
     const limit = OFF_ROUTE_METERS + Math.min(accuracy, ACCURACY_SLACK_MAX);
     if (match.distance > limit) {
-      const diverging = match.distance > s.offRouteDist + 5;
-      s.offRouteFixes = diverging ? s.offRouteFixes + 1 : 0;
-      s.offRouteDist = match.distance;
-      if (s.offRouteFixes >= OFF_ROUTE_FIXES && s.rerouteRun < MAX_REROUTES) {
-        s.rerouteRun++; s.reroutes++; s.offRouteFixes = 0;
+      if (!s.offRouteSince) s.offRouteSince = now;
+      s.offRouteFixes++;
+      if (s.offRouteFixes >= OFF_ROUTE_FIXES && now - s.offRouteSince >= OFF_ROUTE_MS
+          && s.rerouteRun < MAX_REROUTES) {
+        s.rerouteRun++; s.reroutes++; s.offRouteFixes = 0; s.offRouteSince = 0;
       }
     } else {
-      s.offRouteFixes = 0; s.offRouteDist = 0; s.rerouteRun = 0;
+      s.offRouteFixes = 0; s.offRouteSince = 0; s.rerouteRun = 0;
     }
   }
   return s;
@@ -74,6 +77,15 @@ for (let i = 1; i <= 12; i++) missed.push([JUNC + i * 0.0004, LAT]);   // ~33 m 
 const real = drive(missed, 150);
 console.log('  drifting away:', missed.slice(0, 6).map((p) => Math.round(N.project(p, nav.coords, nav.cum, 0).distance) + 'm').join(' '));
 check('a real missed turn re-routes', real.reroutes >= 1, true);
+
+// The case that actually failed on the road: you turn off and then drive along a
+// street roughly parallel to the route, so the distance stops growing. The old
+// rule wanted every fix to be further off than the last and never fired at all.
+const parallel = [];
+for (let i = 1; i <= 15; i++) parallel.push([JUNC + 0.0016 + i * 0.00002, LAT - i * 0.00018]);
+const parallelOff = Math.round(N.project(parallel[0], nav.coords, nav.cum, 0).distance);
+console.log(`  parallel street, ${parallelOff} m off the line and barely widening`);
+check('re-routes when off-route but no longer diverging', drive(parallel, 150).reroutes >= 1, true);
 check('and does not re-route more than the cap', real.reroutes <= MAX_REROUTES, true);
 
 // 2. A coarse but steady position, parked 90 m off the line. This is what put
@@ -83,6 +95,10 @@ for (let i = 0; i < 40; i++) steady.push([LON0 + 0.004 + (i % 2) * 0.00001, LAT 
 const off = Math.round(N.project(steady[0], nav.coords, nav.cum, 0).distance);
 console.log(`  steady offset: ${off} m, limit ${OFF_ROUTE_METERS + 60} m`);
 check('a steady coarse offset never re-routes', drive(steady, 200).reroutes, 0);
+
+const spike = [[JUNC + 0.004, LAT], [JUNC + 0.004, LAT]].concat(
+  Array.from({ length: 10 }, (_, i) => [LON0 + 0.002 + i * 0.0002, LAT]));
+check('a two-fix GPS spike does not re-route', drive(spike, 20).reroutes, 0);
 
 // 3. Even a far, steady offset must not loop for ever
 const far = [];
