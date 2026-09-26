@@ -1,3 +1,17 @@
+/* The car's browser has no Georgian font, so Georgian street and place names
+   came out as empty boxes. Shipped with the site rather than pulled from Google,
+   so it still works on a slow connection and depends on nobody else.
+   Noto Sans Georgian, SIL Open Font License — see fonts/OFL.txt.
+   The unicode-range means the 41 KB is fetched only when Georgian text appears. */
+@font-face {
+  font-family: 'Noto Sans Georgian';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/noto-sans-georgian.woff2') format('woff2');
+  unicode-range: U+0589, U+10A0-10FF, U+1C90-1CBA, U+1CBD-1CBF, U+205A, U+2D00-2D2F, U+2E31;
+}
+
 :root {
   --bg: #ffffff;
   --fg: #14171a;
@@ -21,7 +35,7 @@ body.night {
 [hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; overflow: hidden; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Georgian", sans-serif;
+  font-family: 'Noto Sans Georgian', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 18px;
   color: var(--fg);
   background: #111418;
@@ -65,6 +79,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .results li:hover, .results li:focus { background: var(--line); }
 .results .r-name { font-weight: 600; }
 .results .r-sub { color: var(--muted); font-size: 15px; margin-top: 2px; }
+
+/* While driving, the destination shrinks aside instead of covering the map */
+body.driving .search { width: min(250px, calc(100vw - 104px)); opacity: 0.94; }
+body.driving .search input { height: 42px; font-size: 15px; padding: 0 38px 0 14px; }
+body.driving .search .icon-btn { width: 32px; height: 32px; top: 5px; right: 5px; font-size: 15px; }
 
 /* Round controls */
 .controls { position: absolute; top: 16px; right: 16px; display: flex; flex-direction: column; gap: 12px; z-index: 5; }
@@ -283,6 +302,8 @@ body.night .route-meta span:first-child { color: #3fb950; }
 
   .phone { left: 16px; right: 104px; width: auto; top: 96px; }
   .account { left: 16px; right: 104px; width: auto; top: 96px; }
+  body.driving .search { right: auto; width: min(340px, calc(100vw - 120px)); }
+  body.driving .search input { height: 48px; font-size: 17px; }
   .login input { height: 60px; font-size: 19px; }
   #pairQr { width: 220px; height: 220px; }
   .paircode { font-size: 54px; }

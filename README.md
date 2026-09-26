@@ -137,6 +137,7 @@ The list ships empty. Add an entry and it shows on the map and in the ⚠ panel.
 
 ```
 public/     index.html, app.js (map + navigation), nav.js (route maths, arrows),
+            fonts/ (Noto Sans Georgian, bundled because the car has none),
             boot.js (picks the map engine), send.html (phone page), check.html,
             style.css, updates.json
 src/        worker.js (the API and the link resolver), accounts.js (sign-in,

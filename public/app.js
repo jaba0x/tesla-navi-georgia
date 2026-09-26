@@ -579,6 +579,7 @@
     if (preview) {
       // Show the whole trip and wait for Start, the way a navigation app does
       state.navigating = false;
+      document.body.classList.remove('driving');
       panel.classList.remove('collapsed');
       panel.classList.add('preview');
       setFollow(false);
@@ -593,6 +594,7 @@
   function beginGuidance() {
     if (!state.nav) return;
     state.navigating = true;
+    document.body.classList.add('driving');
     const panel = $('routePanel');
     panel.classList.remove('preview');
     panel.classList.add('collapsed');
@@ -656,6 +658,7 @@
   function endNavigation(arrived) {
     state.nav = null;
     state.navigating = false;
+    document.body.classList.remove('driving');
     $('routePanel').classList.remove('preview');
     state.progress = null;
     state.offRouteFixes = 0;
