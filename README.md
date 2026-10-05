@@ -1,4 +1,4 @@
-![TeslaNaviGeorgia](docs/brand/patreon-cover.png)
+![TeslaNaviGeorgia](docs/brand/github-social-preview.png)
 
 # TeslaNaviGeorgia
 
