@@ -39,6 +39,9 @@
   const REROUTE_COOLDOWN_MS = 15000;
   const ARRIVE_METERS = 25;
   const SPEAK_AT = [800, 200, 45]; // metres before a turn
+  const TRAFFIC_EVERY_MS = 120000;  // how often to ask for fresh traffic while driving
+  const TRAFFIC_MAX_AGE_MS = 300000; // older than this and the ETA goes back to the plain one
+  const TRAFFIC_ROUTE_TOLERANCE = 0.15; // Google's route must be within this of ours to trust it
 
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -59,6 +62,8 @@
     rerouteGaveUp: false,
     spoken: new Set(),
     updates: [],
+    // Live traffic along the route, when the server has it switched on
+    traffic: { enabled: null, spans: [], seconds: null, at: 0, timer: null },
     user: null,       // signed-in username, or null
     favs: [],         // saved places for that user
     sim: null,
@@ -134,6 +139,7 @@
     map.addSource('route-done', { type: 'geojson', data: emptyFC() });
     map.addSource('route', { type: 'geojson', data: emptyFC() });
     map.addSource('maneuvers', { type: 'geojson', data: emptyFC() });
+    map.addSource('route-traffic', { type: 'geojson', data: emptyFC() });
 
     // The part already driven, dimmed
     map.addLayer({
@@ -151,6 +157,15 @@
       id: 'route-line', type: 'line', source: 'route',
       layout: { 'line-join': 'round', 'line-cap': 'round' },
       paint: { 'line-color': '#3b8cff', 'line-width': lineWidth(9) },
+    });
+    // Slow and jammed stretches, over the line, under the arrows
+    map.addLayer({
+      id: 'route-traffic', type: 'line', source: 'route-traffic',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: {
+        'line-color': ['match', ['get', 'level'], 2, '#d1242f', '#fb8500'],
+        'line-width': lineWidth(9),
+      },
     });
     // Direction arrows riding along the line
     map.addLayer({
@@ -568,10 +583,12 @@
       state.rerouteGaveUp = false;
     }
 
+    clearTraffic();
     drawRoute();
     renderSteps();
     if (state.navigating && state.position) trackProgress();
     updateBanner();
+    refreshTraffic();
 
     const panel = $('routePanel');
     panel.hidden = false;
@@ -595,6 +612,7 @@
     if (!state.nav) return;
     state.navigating = true;
     document.body.classList.add('driving');
+    if (!state.traffic.timer) state.traffic.timer = setInterval(refreshTraffic, TRAFFIC_EVERY_MS);
     const panel = $('routePanel');
     panel.classList.remove('preview');
     panel.classList.add('collapsed');
@@ -631,6 +649,16 @@
     const traveled = state.progress?.traveled || 0;
     map.getSource('route')?.setData(N.slice(nav, traveled, nav.total));
     map.getSource('route-done')?.setData(traveled > 10 ? N.slice(nav, 0, traveled) : emptyFC());
+    map.getSource('route-traffic')?.setData({
+      type: 'FeatureCollection',
+      features: state.traffic.spans
+        .filter((sp) => sp.to > traveled + 5)
+        .map((sp) => {
+          const f = N.slice(nav, Math.max(sp.from, traveled), sp.to);
+          f.properties = { level: sp.level };
+          return f;
+        }),
+    });
     map.getSource('maneuvers')?.setData({
       type: 'FeatureCollection',
       features: nav.steps.slice(1, -1).map((s) => ({
@@ -659,6 +687,8 @@
     state.nav = null;
     state.navigating = false;
     document.body.classList.remove('driving');
+    clearTraffic();
+    if (state.traffic.timer) { clearInterval(state.traffic.timer); state.traffic.timer = null; }
     $('routePanel').classList.remove('preview');
     state.progress = null;
     state.offRouteFixes = 0;
@@ -783,6 +813,54 @@
     return state.progress;
   }
 
+  // ---------------------------------------------------------------- traffic
+  // Asks the server for live traffic along the road ahead. The server only has
+  // it when GOOGLE_TRAFFIC is on; otherwise the first answer says so and we
+  // never ask again. Google's answer is trusted only when its route is about
+  // the same length as ours, so stretches land on the right road.
+  function clearTraffic() {
+    state.traffic.spans = [];
+    state.traffic.seconds = null;
+    state.traffic.at = 0;
+    map.getSource('route-traffic')?.setData(emptyFC());
+  }
+
+  async function refreshTraffic() {
+    const nav = state.nav, d = state.destination;
+    if (!nav || !d || state.traffic.enabled === false) return;
+    const here = state.progress?.snapped || (state.position ? [state.position.lon, state.position.lat] : null);
+    if (!here) return;
+    const traveled = state.progress?.traveled || 0;
+    const ours = nav.total - traveled;
+
+    let data;
+    try {
+      const res = await fetch(`/api/traffic?from=${here[0]},${here[1]}&to=${d.lon},${d.lat}`);
+      data = await res.json();
+    } catch {
+      return;
+    }
+    if (data.enabled === false) { state.traffic.enabled = false; return; }
+    state.traffic.enabled = true;
+    if (!data.routes || nav !== state.nav) return;   // nothing usable, or the route changed meanwhile
+
+    // The Google route closest in length to ours is the one for the same roads
+    const best = data.routes.reduce((a, r) =>
+      (Math.abs(r.distance - ours) < Math.abs(a.distance - ours) ? r : a));
+    if (Math.abs(best.distance - ours) > ours * TRAFFIC_ROUTE_TOLERANCE) return;
+
+    const k = ours / best.distance;
+    state.traffic.spans = best.spans.map((sp) => ({
+      level: sp.level,
+      from: traveled + sp.start * k,
+      to: traveled + (sp.start + sp.length) * k,
+    }));
+    state.traffic.seconds = best.trafficSec;
+    state.traffic.at = Date.now();
+    drawRoute();
+    updateBanner();
+  }
+
   // ---------------------------------------------------------------- nav UI
   function updateBanner() {
     const nav = state.nav;
@@ -806,8 +884,14 @@
       thenRow.hidden = true;
     }
 
-    const seconds = p ? p.seconds : nav.duration;
     const remaining = p ? p.remaining : nav.total;
+    let seconds = p ? p.seconds : nav.duration;
+    const t = state.traffic;
+    if (t.seconds !== null && Date.now() - t.at < TRAFFIC_MAX_AGE_MS) {
+      // Google's figure was for the road from where we were when we asked;
+      // let it tick down rather than sit still between refreshes
+      seconds = Math.max(60, t.seconds - (Date.now() - t.at) / 1000);
+    }
     $('routeEta').textContent = new Date(Date.now() + seconds * 1000)
       .toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     $('routeDist').textContent = N.fmtDist(remaining);

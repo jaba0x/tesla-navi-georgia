@@ -105,6 +105,34 @@ attempts on a username buys a ten minute cool-off. To sign everyone out:
 npx wrangler d1 execute geodrive-inbox --remote --command "DELETE FROM sessions"
 ```
 
+## Live traffic, off by default
+
+Nobody licenses traffic data for Georgia to a third-party map. Google and Yandex
+only show it on their own maps; TomTom and HERE have no Georgian coverage at all,
+because nobody here runs their software. So this reads the keyless endpoint the
+Google Maps website itself calls, the way [Vela Maps](https://github.com/PimpinPumpkin/Vela)
+does, and paints the slow and jammed stretches onto the route ahead with the
+in-traffic arrival time. It only asks for the road you are on, every two minutes
+while driving, and only trusts the answer when Google's route is about the same
+length as ours.
+
+Be clear about what that is. It is undocumented, it is against Google's terms,
+and it will break when Google changes the response shape. It is off until you
+turn it on:
+
+```bash
+npx wrangler secret put GOOGLE_TRAFFIC      # type: on
+```
+
+Delete the secret to turn it off. Nothing else depends on it; without it the car
+shows the plain OSRM estimate as before.
+
+When it breaks, `test/traffic.test.js` goes red first. Capture a fresh response
+the way `test/fixtures/google-directions.json` was captured, adjust `PATHS` in
+`src/traffic.js` until the test passes, and redeploy. There is no detection
+evasion in here and there will not be: if Google starts refusing Cloudflare's
+addresses, delete the secret and that is the end of it.
+
 ## Publishing road updates
 
 Edit `public/updates.json`, commit and push, and it goes live a minute later. Each item:
@@ -134,6 +162,7 @@ The list ships empty. Add an entry and it shows on the map and in the ⚠ panel.
 | 3D terrain | Mapzen elevation tiles on AWS Open Data, via `/api/dem` |
 | Phone → car | Cloudflare D1, via `/api/send` and `/api/inbox` |
 | Accounts | Cloudflare D1, via `/api/login`, `/api/me` and `/api/favourites` |
+| Traffic | Google's keyless directions endpoint, via `/api/traffic`, only when switched on |
 
 ```
 public/     index.html, app.js (map + navigation), nav.js (route maths, arrows),
@@ -141,9 +170,10 @@ public/     index.html, app.js (map + navigation), nav.js (route maths, arrows),
             boot.js (picks the map engine), send.html (phone page), check.html,
             style.css, updates.json
 src/        worker.js (the API and the link resolver), accounts.js (sign-in,
-            sessions, saved places), http.js
+            sessions, saved places), traffic.js (live traffic, see above), http.js
 tools/      adduser.mjs, brand.js
-test/       nav.test.js, auth.test.js — plain `node test/<file>`, no dependencies.
+test/       nav.test.js, auth.test.js, traffic.test.js — plain `node test/<file>`,
+            no dependencies. fixtures/ holds a real Google response from Tbilisi.
             camera.test.js drives real MapLibre in headless Chromium to check
             where the car lands on screen; it skips unless you install
             playwright and maplibre-gl
