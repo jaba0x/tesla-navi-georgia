@@ -12,9 +12,6 @@
     "run_worker_first": ["/api/*"]
   },
   "observability": { "enabled": true },
-  // Live traffic along the route is off unless the GOOGLE_TRAFFIC secret is "on":
-  //   npx wrangler secret put GOOGLE_TRAFFIC
-  // A secret rather than a var so a deploy never flips it. See src/traffic.js.
   // Short-lived mailbox for places sent from a phone (see /api/send, /api/inbox).
   // A database rather than KV: a place sent from a phone must be readable by the
   // car within seconds, and KV reads can lag a write by up to a minute.

@@ -4,7 +4,6 @@
 
 import { httpError, json } from './http.js';
 import { favourites, login, logout, me } from './accounts.js';
-import { traffic } from './traffic.js';
 
 const UA = 'GeoDrive/0.1 (+https://github.com/jaba0x/georgia-drive-map)';
 
@@ -47,8 +46,6 @@ export default {
           return await me(request, env);
         case '/api/favourites':
           return await favourites(request, env, url);
-        case '/api/traffic':
-          return await traffic(url, env, ctx);
         case '/api/resolve':
           return await resolveLink(url);
         case '/api/health':
