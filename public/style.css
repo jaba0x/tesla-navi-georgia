@@ -98,6 +98,15 @@ body.driving .search .icon-btn { width: 32px; height: 32px; top: 5px; right: 5px
 .round-btn.brandmark svg { display: block; width: 30px; height: 30px; margin: 0 auto; }
 .round-btn.brandmark.active { color: #fff; }
 
+/* Zoom buttons, bottom right where a hand rests, and only while driving:
+   before Start the whole route is on screen and pinching works as usual */
+.zoom {
+  position: absolute; right: 16px; bottom: 72px; z-index: 5;
+  display: none; flex-direction: column; gap: 12px;
+}
+body.driving .zoom { display: flex; }
+.zoom .round-btn { font-size: 34px; font-weight: 600; line-height: 1; }
+
 /* Start-up error */
 .boot-error {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
@@ -206,6 +215,26 @@ body.driving .search .icon-btn { width: 32px; height: 32px; top: 5px; right: 5px
 .then-arrow svg { width: 22px; height: 22px; }
 .then-instr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Other routes to choose from, before Start. The chosen one is filled in. */
+.route-options { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.chip {
+  flex: 1 1 auto; min-width: 0; height: 46px; padding: 0 14px; border-radius: 12px;
+  border: 1px solid var(--line); background: transparent; color: var(--fg);
+  font-size: 15px; font-weight: 600; text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.chip .chip-via { display: block; font-weight: 400; color: var(--muted); font-size: 13px; margin-top: 1px; }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.chip.active .chip-via { color: rgba(255, 255, 255, 0.82); }
+
+/* Recent destinations, offered when the search box is empty */
+.results li.recent { display: flex; align-items: center; gap: 12px; }
+.results .r-clock { flex: none; width: 22px; height: 22px; color: var(--muted); }
+.results .r-clock svg { display: block; width: 22px; height: 22px; }
+.results li.recent .r-body { min-width: 0; }
+.results li.heading { padding: 10px 20px 2px; font-size: 13px; color: var(--muted); cursor: default; }
+.results li.heading:hover { background: transparent; }
+
 /* trip progress */
 .progress { height: 6px; border-radius: 3px; background: var(--line); margin: 14px 0 10px; overflow: hidden; }
 .progress-bar { height: 100%; width: 0; background: var(--accent); border-radius: 3px; transition: width 0.6s linear; }
@@ -310,4 +339,9 @@ body.night .route-meta span:first-child { color: #3fb950; }
   .updates { left: 16px; right: 104px; width: auto; top: 96px; bottom: 16px; }
 
   .toast { font-size: 19px; bottom: 32px; }
+  /* The turn card spans the bottom here, so the zoom buttons continue the
+     column of round buttons instead: 7 buttons of 72px with 12px gaps */
+  .zoom { bottom: auto; top: calc(16px + 7 * 84px); }
+  .chip { height: 56px; font-size: 18px; }
+  .chip .chip-via { font-size: 15px; }
 }

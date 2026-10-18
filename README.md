@@ -18,8 +18,9 @@ Not affiliated with or endorsed by Tesla, Inc.
 
 | | |
 | --- | --- |
-| **Search** | Places across Georgia, or paste a Google Maps link or coordinates |
+| **Search** | Places across Georgia, or paste a Google Maps link or coordinates. Your last three destinations wait in the empty search box |
 | **Navigation** | Turn-by-turn with spoken directions, live ETA, automatic re-routing |
+| **Route choice** | Up to three routes before you start, the way Google Maps offers them |
 | **3D** | Real terrain and 3D buildings; the camera tilts and turns as you drive |
 | **Send from phone** | Share a place from Google Maps on your phone and it appears in the car |
 | **Road updates** | Closures, road works, hazards and chargers you publish yourself |
@@ -32,7 +33,11 @@ Open **tesla.jaba.ge** in the car browser and allow location access.
 ### 1. Pick a destination
 
 Type a place in the search box, tap anywhere on the map, or send one from your phone.
-You get the whole route first, with distance and arrival time.
+You get the whole route first, with distance and arrival time. When there is more
+than one sensible way, the others are drawn in grey with how much longer each one
+takes (“+4 min”), and listed under the trip as buttons. Tap a grey line or a button
+to take that one instead. Tapping the empty search box shows your last three
+destinations.
 
 ![Route preview with the Start button](docs/route-preview.jpg)
 
@@ -40,6 +45,10 @@ You get the whole route first, with distance and arrival time.
 
 The camera swoops down into the driving view. The panel shrinks to a single bar showing
 the next turn. Tap it any time to see the trip details, the step list and the End button.
+
+The camera zooms by itself, closer for turns and wider at speed. The **+** and **−**
+buttons that appear while driving, or a pinch, shift that closer or wider without
+leaving the driving view, and the setting is remembered for the next drive.
 
 ![Driving view](docs/navigation.jpg)
 
@@ -72,6 +81,7 @@ too, as do plain coordinates like `41.7151, 44.7930`.
 | ⚠ | Road updates |
 | ◐ | Day / night map |
 | 👤 | Sign in, and your saved places |
+| + − | Closer or wider while driving |
 
 ## Accounts and saved places
 

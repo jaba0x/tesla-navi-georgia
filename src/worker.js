@@ -59,14 +59,19 @@ export default {
   },
 };
 
-// GET /api/route?from=lon,lat&to=lon,lat&bearing=deg
+// GET /api/route?from=lon,lat&to=lon,lat[&bearing=deg][&alternatives=1]
 async function route(url, ctx) {
   const from = parseLonLat(url.searchParams.get('from'));
   const to = parseLonLat(url.searchParams.get('to'));
   if (!from || !to) throw httpError(400, 'from and to must be "lon,lat"');
 
+  // Before Start the car asks for alternatives so the driver can pick, the way
+  // Google Maps offers two or three routes. A re-route never does: the driver
+  // is moving and wants one answer. Cached apart, since the answers differ.
+  const alternatives = url.searchParams.get('alternatives') === '1';
   const coords = `${from.join(',')};${to.join(',')}`;
-  const base = 'overview=full&geometries=geojson&steps=true&alternatives=false';
+  const key = `route/${coords}${alternatives ? '/alt' : ''}`;
+  const base = `overview=full&geometries=geojson&steps=true&alternatives=${alternatives ? 3 : 'false'}`;
 
   // With a heading, OSRM starts the route on a road running that way. Without
   // one it takes the nearest edge whichever way it points, which on a re-route
@@ -78,7 +83,7 @@ async function route(url, ctx) {
     try {
       return await cachedJson(
         ctx,
-        `route/${coords}/b${bucket}`,
+        `${key}/b${bucket}`,
         300,
         `${OSRM_URL}/${coords}?${base}&bearings=${deg},75;`,
       );
@@ -87,7 +92,7 @@ async function route(url, ctx) {
     }
   }
 
-  return cachedJson(ctx, `route/${coords}`, 300, `${OSRM_URL}/${coords}?${base}`);
+  return cachedJson(ctx, key, 300, `${OSRM_URL}/${coords}?${base}`);
 }
 
 // GET /api/search?q=...&lat=..&lon=..

@@ -33,6 +33,13 @@
     </button>
   </div>
 
+  <!-- Zoom while driving. The camera picks its own zoom from speed and the next
+       turn; these nudge it closer or wider, and the choice is remembered. -->
+  <div class="zoom" id="zoomControls">
+    <button class="round-btn" id="zoomIn" title="Zoom in">+</button>
+    <button class="round-btn" id="zoomOut" title="Zoom out">−</button>
+  </div>
+
   <!-- Shown when the page cannot start, instead of a blank map -->
   <div class="boot-error" id="bootError" hidden>
     <div class="boot-error-title" id="bootErrorText"></div>
@@ -117,6 +124,9 @@
       <span id="routeDist"></span>
       <span id="routeTime"></span>
     </div>
+
+    <!-- Other ways to go, before Start. Tap one here or on the map. -->
+    <div class="route-options preview-only" id="routeOptions" hidden></div>
 
     <div class="route-actions">
       <button class="btn primary preview-only" id="startNav">Start</button>

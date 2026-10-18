@@ -39,6 +39,10 @@
   const REROUTE_COOLDOWN_MS = 15000;
   const ARRIVE_METERS = 25;
   const SPEAK_AT = [800, 200, 45]; // metres before a turn
+  const ZOOM_STEP = 0.6;            // one tap of + or − while driving
+  const ZOOM_OFFSET_MIN = -3;       // wider than this and the route is a thread
+  const ZOOM_OFFSET_MAX = 1.5;      // closer than this and the car fills the screen
+  const RECENT_MAX = 3;             // destinations offered when the search box is empty
 
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -49,6 +53,8 @@
     follow: true,
     destination: null,  // { lon, lat, name }
     nav: null,          // prepared route (see GeoNav.prepare)
+    routes: [],         // the OSRM routes on offer before Start, chosen one first drawn blue
+    routeChoice: 0,     // index into routes
     navigating: false,  // false while previewing a route, true after Start
     progress: null,     // { traveled, stepIndex, toNext, remaining, eta }
     lastReroute: 0,
@@ -60,6 +66,8 @@
     spoken: new Set(),
     updates: [],
     user: null,       // signed-in username, or null
+    // The driver's own zoom nudge on top of the speed-based zoom, kept between drives
+    zoomOffset: clampZoomOffset(Number(localGet('navZoom')) || 0),
     favs: [],         // saved places for that user
     sim: null,
   };
@@ -79,6 +87,9 @@
     document.body.appendChild(debugEl);
   }
   const num = (v, digits = 0) => (typeof v === 'number' && isFinite(v) ? v.toFixed(digits) : '–');
+  function clampZoomOffset(v) {
+    return Math.min(ZOOM_OFFSET_MAX, Math.max(ZOOM_OFFSET_MIN, Number.isFinite(v) ? v : 0));
+  }
 
   function debugOut(match) {
     if (!debugEl) return;
@@ -120,7 +131,12 @@
   });
   map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-right');
   map.on('style.load', () => { window.geodriveMapReady = true; addOverlays(); });
-  map.on('dragstart', () => { panToken++; setFollow(false); });
+  map.on('dragstart', (e) => {
+    const touches = e.originalEvent && e.originalEvent.touches;
+    if (touches && touches.length > 1) return;   // a pinch to zoom, handled below
+    panToken++;
+    setFollow(false);
+  });
 
   function addOverlays() {
     add3D();
@@ -134,6 +150,20 @@
     map.addSource('route-done', { type: 'geojson', data: emptyFC() });
     map.addSource('route', { type: 'geojson', data: emptyFC() });
     map.addSource('maneuvers', { type: 'geojson', data: emptyFC() });
+    map.addSource('route-alt', { type: 'geojson', data: emptyFC() });
+    map.addSource('route-alt-labels', { type: 'geojson', data: emptyFC() });
+
+    // Other routes on offer before Start: grey, under the chosen one
+    map.addLayer({
+      id: 'route-alt-casing', type: 'line', source: 'route-alt',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#3a4350', 'line-width': lineWidth(13), 'line-opacity': 0.9 },
+    });
+    map.addLayer({
+      id: 'route-alt-line', type: 'line', source: 'route-alt',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#aab4c0', 'line-width': lineWidth(8) },
+    });
 
     // The part already driven, dimmed
     map.addLayer({
@@ -169,6 +199,18 @@
       paint: {
         'circle-radius': 5, 'circle-color': '#fff',
         'circle-stroke-color': '#0b3d91', 'circle-stroke-width': 3,
+      },
+    });
+    // "+4 min" on each alternative, where it is furthest from the chosen route
+    map.addLayer({
+      id: 'route-alt-label', type: 'symbol', source: 'route-alt-labels',
+      layout: {
+        'text-field': ['get', 'label'], 'text-size': 16,
+        'text-allow-overlap': true, 'text-ignore-placement': true,
+        'text-padding': 6, 'text-anchor': 'bottom', 'text-offset': [0, -0.6],
+      },
+      paint: {
+        'text-color': '#14171a', 'text-halo-color': '#ffffff', 'text-halo-width': 2.2,
       },
     });
   }
@@ -276,6 +318,9 @@
   // so below this zoom the ground goes flat and the hill shading carries the relief.
   const TERRAIN_MAX_ZOOM = 15.2;
   function updateTerrain() {
+    // Not before the style has loaded: a GPS fix that arrives first moved the
+    // camera, and setTerrain() on an unloaded style threw on every move
+    if (!window.geodriveMapReady) return;
     const want = state.view3d && map.getZoom() < TERRAIN_MAX_ZOOM;
     const has = Boolean(map.getTerrain());
     if (want === has) return;
@@ -365,11 +410,11 @@
   // A chase camera, redrawn every frame and easing toward its target, so the map
   // glides and turns the way a car navigation screen does instead of stepping
   // once per GPS fix.
-  const cam = { lon: null, lat: null, bearing: 0, zoom: 15, pitch: 0 };
+  const cam = { lon: null, lat: null, bearing: 0, zoom: 15, pitch: 0, applied: null }; // applied: zoom last written
   const car = { lon: null, lat: null, bearing: 0 };
 
   // Zoom like a car navigation app: close in for turns, wider at speed.
-  function navZoom() {
+  function baseNavZoom() {
     const speed = state.position?.speed || 0;
     const toNext = state.progress ? state.progress.toNext : Infinity;
     if (toNext < 150) return 18;
@@ -377,6 +422,44 @@
     if (speed > 25) return 15.6;   // ~90 km/h
     if (speed > 14) return 16.3;   // ~50 km/h
     return 16.8;
+  }
+  // ...plus the driver's own nudge, from the + and − buttons or a pinch
+  function navZoom() {
+    return baseNavZoom() + state.zoomOffset;
+  }
+
+  function setZoomOffset(v) {
+    state.zoomOffset = clampZoomOffset(v);   // no rounding: a pinch arrives in small steps
+    localSet('navZoom', state.zoomOffset.toFixed(3));
+    $('zoomIn').disabled = state.zoomOffset >= ZOOM_OFFSET_MAX;
+    $('zoomOut').disabled = state.zoomOffset <= ZOOM_OFFSET_MIN;
+  }
+  $('zoomIn').onclick = () => setZoomOffset(state.zoomOffset + ZOOM_STEP);
+  $('zoomOut').onclick = () => setZoomOffset(state.zoomOffset - ZOOM_STEP);
+  setZoomOffset(state.zoomOffset);
+
+  // A pinch or a scroll wheel while driving nudges the zoom the same way. The
+  // chase camera writes the zoom every frame, so if the map's zoom is not what
+  // it last wrote, a gesture changed it; the difference is folded into the
+  // offset and the camera carries on from there instead of snapping back.
+  // (MapLibre's zoomstart event does not reliably say whether a gesture or a
+  // script caused it, so the camera keeps its own record.)
+  function gestureActive() {
+    const handlers = [map.scrollZoom, map.touchZoomRotate, map.touchPitch, map.dragPan, map.dragRotate, map.doubleClickZoom];
+    for (const h of handlers) {
+      if (!h) continue;
+      if (typeof h.isActive === 'function' && h.isActive()) return true;
+      if (typeof h.isZooming === 'function' && h.isZooming()) return true;   // scroll wheel, settling
+    }
+    return false;
+  }
+
+  function adoptUserZoom() {
+    if (cam.applied === null) return;
+    const delta = map.getZoom() - cam.applied;
+    if (Math.abs(delta) < 1e-4) return;
+    if (state.nav && state.navigating && state.progress) setZoomOffset(state.zoomOffset + delta);
+    cam.zoom = map.getZoom();
   }
 
   /**
@@ -460,7 +543,12 @@
     if (target.carBearing !== null) meMarker.setRotation(car.bearing);
 
     if (!state.follow) return;
+    // Hands on the screen: stand down for the gesture. jumpTo() cancels any
+    // gesture in progress, so writing the camera every frame made a pinch
+    // impossible while following. The zoom it leaves behind is adopted below.
+    if (gestureActive()) return;
     if (cam.lon === null) Object.assign(cam, { lon: target.lon, lat: target.lat, bearing: target.bearing, zoom: target.zoom, pitch: target.pitch });
+    adoptUserZoom();
 
     const ease = LITE ? 2.5 : 1;
     cam.lon += (target.lon - cam.lon) * 0.12 * ease;
@@ -469,15 +557,18 @@
     cam.zoom += (target.zoom - cam.zoom) * 0.05 * ease;
     cam.pitch += (target.pitch - cam.pitch) * 0.08 * ease;
 
-    // flat ground close up, raised terrain from a distance (with a little hysteresis)
+    // flat ground close up, raised terrain from a distance (with a little hysteresis).
+    // Not before the style has loaded: a GPS fix that arrives first made every
+    // frame throw "Style is not done loading", and the boot error came up over the map.
     const hasTerrain = !LITE && Boolean(map.getTerrain());
-    if (LITE) { /* no terrain here */ }
+    if (LITE || !window.geodriveMapReady) { /* no terrain here, or not yet */ }
     else if (state.view3d && cam.zoom >= TERRAIN_MAX_ZOOM && hasTerrain) map.setTerrain(null);
     else if (state.view3d && cam.zoom < TERRAIN_MAX_ZOOM - 0.3 && !hasTerrain) {
       map.setTerrain({ source: 'dem', exaggeration: 1 });
     }
 
     map.jumpTo({ center: [cam.lon, cam.lat], bearing: cam.bearing, zoom: cam.zoom, pitch: cam.pitch, padding: target.padding });
+    cam.applied = map.getZoom();
   }
   requestAnimationFrame(frame);
 
@@ -487,6 +578,7 @@
     Object.assign(cam, {
       lon: map.getCenter().lng, lat: map.getCenter().lat,
       bearing: map.getBearing(), zoom: map.getZoom(), pitch: map.getPitch(),
+      applied: null,
     });
     state.follow = true;
     $('followBtn').classList.add('active');
@@ -518,6 +610,7 @@
       Object.assign(cam, { lon: target.lon, lat: target.lat, bearing: target.bearing, zoom: target.zoom, pitch: target.pitch });
       Object.assign(car, { lon: target.car[0], lat: target.car[1], bearing: target.carBearing ?? 0 });
       map.jumpTo({ center: [cam.lon, cam.lat], bearing: cam.bearing, zoom: cam.zoom, pitch: cam.pitch, padding: target.padding });
+      cam.applied = map.getZoom();
     }
   }
 
@@ -525,6 +618,7 @@
   async function setDestination(dest) {
     state.destination = dest;
     destMarker.setLngLat([dest.lon, dest.lat]).addTo(map);
+    rememberDestination(dest);
     await requestRoute(true);
     updateStar();
   }
@@ -542,20 +636,99 @@
     // a road running that way made it pick roads the car was nowhere near when
     // the reported heading was stale, and the drawn route stopped matching the
     // streets. Worth revisiting once the debug overlay shows the heading is good.
+    // Before Start, ask for alternatives too, so the driver can choose
+    const alt = preview ? '&alternatives=1' : '';
     try {
-      const res = await fetch(`/api/route?from=${origin.lon},${origin.lat}&to=${d.lon},${d.lat}`);
+      const res = await fetch(`/api/route?from=${origin.lon},${origin.lat}&to=${d.lon},${d.lat}${alt}`);
       const data = await res.json();
       if (!res.ok || data.code !== 'Ok' || !data.routes?.length) {
         toast(data.error || data.message || 'No route found');
         return;
       }
-      startNavigation(data.routes[0], preview);
+      state.routes = preview ? data.routes.slice(0, 3) : [data.routes[0]];
+      state.routeChoice = 0;
+      startNavigation(state.routes[0], preview);
     } catch {
       toast('Routing failed — check your connection');
     }
   }
 
-  function startNavigation(route, preview) {
+  /** Switch to another of the routes on offer. Only before Start. */
+  function chooseRoute(i) {
+    if (state.navigating || !state.routes[i] || i === state.routeChoice) return;
+    state.routeChoice = i;
+    startNavigation(state.routes[i], true, { keepView: true });
+  }
+
+  // ---------------------------------------------------------------- alternatives
+  // The other routes are drawn grey with "+4 min" where each one parts from the
+  // chosen route, and listed as chips in the panel. Tapping either picks it.
+  function drawAlternatives() {
+    const others = state.navigating ? [] : state.routes
+      .map((r, i) => ({ r, i })).filter(({ i }) => i !== state.routeChoice);
+    const chosen = state.nav;
+
+    map.getSource('route-alt')?.setData({
+      type: 'FeatureCollection',
+      features: others.map(({ r, i }) => ({
+        type: 'Feature', properties: { idx: i }, geometry: r.geometry,
+      })),
+    });
+    map.getSource('route-alt-labels')?.setData({
+      type: 'FeatureCollection',
+      features: others.map(({ r, i }) => ({
+        type: 'Feature',
+        properties: { idx: i, label: routeDelta(r, chosen) },
+        geometry: { type: 'Point', coordinates: apartFrom(r.geometry.coordinates, chosen) },
+      })),
+    });
+
+    const box = $('routeOptions');
+    box.innerHTML = '';
+    box.hidden = state.navigating || state.routes.length < 2;
+    if (box.hidden) return;
+    state.routes.forEach((r, i) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip' + (i === state.routeChoice ? ' active' : '');
+      const via = r.legs?.[0]?.summary;
+      b.innerHTML = '<span class="chip-main"></span><span class="chip-via"></span>';
+      b.querySelector('.chip-main').textContent = `${N.fmtDuration(r.duration)} · ${N.fmtDist(r.distance)}`;
+      b.querySelector('.chip-via').textContent = via ? `via ${via}` : (i === 0 ? 'Fastest' : 'Alternative');
+      b.onclick = () => chooseRoute(i);
+      box.appendChild(b);
+    });
+  }
+
+  /** "+4 min", "−2 min", or "same time", against the chosen route. */
+  function routeDelta(route, chosen) {
+    const diff = route.duration - chosen.duration;
+    if (Math.abs(diff) < 60) return 'same time';
+    const mins = Math.round(Math.abs(diff) / 60);
+    return `${diff > 0 ? '+' : '−'}${mins} min`;
+  }
+
+  /** The point on an alternative furthest from the chosen line: that is where
+   *  its label can sit without landing on the route it is being compared to. */
+  function apartFrom(coords, chosen) {
+    let best = coords[Math.floor(coords.length / 2)], bestDist = -1;
+    const step = Math.max(1, Math.floor(coords.length / 120));   // enough samples
+    for (let i = 0; i < coords.length; i += step) {
+      const d = N.project(coords[i], chosen.coords, chosen.cum, 0).distance;
+      if (d > bestDist) { bestDist = d; best = coords[i]; }
+    }
+    return best;
+  }
+
+  function clearAlternatives() {
+    state.routes = [];
+    state.routeChoice = 0;
+    map.getSource('route-alt')?.setData(emptyFC());
+    map.getSource('route-alt-labels')?.setData(emptyFC());
+    $('routeOptions').hidden = true;
+  }
+
+  function startNavigation(route, preview, { keepView = false } = {}) {
     state.nav = N.prepare(route);
     state.progress = null;
     state.spoken.clear();
@@ -569,6 +742,7 @@
     }
 
     drawRoute();
+    drawAlternatives();
     renderSteps();
     if (state.navigating && state.position) trackProgress();
     updateBanner();
@@ -583,7 +757,7 @@
       panel.classList.remove('collapsed');
       panel.classList.add('preview');
       setFollow(false);
-      fitToRoute();
+      if (!keepView) fitToRoute();   // picking another route keeps the view still
     } else {
       panel.classList.remove('preview');
       cameraFollow(false);
@@ -595,6 +769,7 @@
     if (!state.nav) return;
     state.navigating = true;
     document.body.classList.add('driving');
+    drawAlternatives();   // clears them: once driving there is one route
     const panel = $('routePanel');
     panel.classList.remove('preview');
     panel.classList.add('collapsed');
@@ -643,6 +818,7 @@
   function fitToRoute() {
     const b = new maplibregl.LngLatBounds();
     state.nav.coords.forEach((c) => b.extend(c));
+    state.routes.forEach((r) => r.geometry.coordinates.forEach((c) => b.extend(c)));
     const panel = $('routePanel').getBoundingClientRect();
     // In portrait the panel spans the bottom, so the room to leave is below the
     // route rather than beside it
@@ -668,6 +844,7 @@
     map.getSource('route')?.setData(emptyFC());
     map.getSource('route-done')?.setData(emptyFC());
     map.getSource('maneuvers')?.setData(emptyFC());
+    clearAlternatives();
     $('routePanel').hidden = true;
     $('searchInput').value = '';
     $('clearSearch').hidden = true;
@@ -872,6 +1049,14 @@
 
   // ---------------------------------------------------------------- map taps
   map.on('click', (e) => {
+    if (!input.value) results.hidden = true;   // the recent list gives way to the map
+    if (state.routes.length > 1 && !state.navigating) {
+      // A fat finger on a thin grey line: look a little around the tap
+      const r = 12;
+      const box = [[e.point.x - r, e.point.y - r], [e.point.x + r, e.point.y + r]];
+      const alt = map.queryRenderedFeatures(box, { layers: ['route-alt-line', 'route-alt-label'] });
+      if (alt.length) { chooseRoute(alt[0].properties.idx); return; }
+    }
     const hits = map.queryRenderedFeatures(e.point, { layers: ['updates-dot', 'updates-halo'] });
     if (hits.length) {
       const u = state.updates.find((x) => x.id === hits[0].properties.id);
@@ -889,8 +1074,10 @@
       setDestination({ lon: lng, lat, name: 'Dropped pin' });
     };
   });
-  map.on('mouseenter', 'updates-dot', () => (map.getCanvas().style.cursor = 'pointer'));
-  map.on('mouseleave', 'updates-dot', () => (map.getCanvas().style.cursor = ''));
+  for (const layer of ['updates-dot', 'route-alt-line', 'route-alt-label']) {
+    map.on('mouseenter', layer, () => (map.getCanvas().style.cursor = 'pointer'));
+    map.on('mouseleave', layer, () => (map.getCanvas().style.cursor = ''));
+  }
 
   // ---------------------------------------------------------------- search
   const input = $('searchInput');
@@ -901,13 +1088,15 @@
   input.addEventListener('input', () => {
     $('clearSearch').hidden = !input.value;
     clearTimeout(searchTimer);
+    if (!input.value.trim()) { renderRecents(); return; }
     searchTimer = setTimeout(runSearch, 350);
   });
+  input.addEventListener('focus', () => { if (!input.value.trim()) renderRecents(); });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { clearTimeout(searchTimer); runSearch(); }
     if (e.key === 'Escape') closeSearch();
   });
-  $('clearSearch').onclick = () => { input.value = ''; closeSearch(); input.focus(); };
+  $('clearSearch').onclick = () => { input.value = ''; closeSearch(); input.focus(); renderRecents(); };
 
   // "41.7151, 44.7930" — coordinates pasted straight in (Google's order: lat, lon)
   const COORDS = /^\s*(-?\d{1,2}(?:\.\d+)?)\s*[,;]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/;
@@ -1001,6 +1190,53 @@
     results.hidden = true;
     if (!keepText) $('clearSearch').hidden = !input.value;
     input.blur();
+  }
+
+  // ---------------------------------------------------------------- recent places
+  // The last few destinations, offered when the search box is empty. Kept in
+  // the browser, so the car remembers its own and a phone remembers its own.
+  function recents() {
+    try {
+      const list = JSON.parse(localGet('recent') || '[]');
+      return Array.isArray(list) ? list.filter((r) => r && Number.isFinite(r.lon) && Number.isFinite(r.lat) && r.name) : [];
+    } catch { return []; }
+  }
+
+  function rememberDestination(dest) {
+    if (!dest || !dest.name || dest.name === 'Dropped pin') return;   // a tap on the map is not a search
+    const same = (r) => Math.abs(r.lon - dest.lon) < 0.0005 && Math.abs(r.lat - dest.lat) < 0.0005;
+    const list = [{ lon: dest.lon, lat: dest.lat, name: String(dest.name).slice(0, 80) },
+      ...recents().filter((r) => !same(r))].slice(0, RECENT_MAX);
+    localSet('recent', JSON.stringify(list));
+  }
+
+  const CLOCK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>';
+
+  function renderRecents() {
+    const list = recents();
+    results.innerHTML = '';
+    if (!list.length) { results.hidden = true; return; }
+    const head = document.createElement('li');
+    head.className = 'heading';
+    head.textContent = 'Recent';
+    results.appendChild(head);
+    for (const r of list) {
+      const li = document.createElement('li');
+      li.className = 'recent';
+      li.tabIndex = 0;
+      li.innerHTML = `<span class="r-clock">${CLOCK}</span><div class="r-body"><div class="r-name"></div></div>`;
+      li.querySelector('.r-name').textContent = r.name;
+      li.onclick = () => {
+        input.value = r.name;
+        $('clearSearch').hidden = false;
+        closeSearch(true);
+        setDestination({ lon: r.lon, lat: r.lat, name: r.name });
+      };
+      results.appendChild(li);
+    }
+    results.hidden = false;
   }
 
   // ---------------------------------------------------------------- road updates
@@ -1390,5 +1626,5 @@
   map.once('style.load', openDeepLink);
 
   // Handy for debugging from the browser console
-  window.geodrive = { map, state, startSim, stopSim, checkInbox, beginGuidance };
+  window.geodrive = { map, state, startSim, stopSim, checkInbox, beginGuidance, chooseRoute, setZoomOffset, navZoom };
 })();
