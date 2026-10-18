@@ -90,7 +90,10 @@
     if (m) {
       return { lat: Number(m[1]), lon: Number(m[2]), name: m[1] + ', ' + m[2] };
     }
-    if (!/^https?:\/\//i.test(text)) throw new Error('Paste a map link or coordinates');
+    // The share sheet often copies "Place name https://maps.app.goo.gl/…"
+    var link = text.match(/https?:\/\/\S+/i);
+    if (!link) throw new Error('Paste a map link or coordinates');
+    text = link[0];
     var res = await fetch('/api/resolve?url=' + encodeURIComponent(text));
     var data = await res.json();
     if (!res.ok || typeof data.lat !== 'number') throw new Error(data.error || 'Could not read that link');

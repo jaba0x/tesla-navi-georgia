@@ -160,8 +160,10 @@ test/       nav.test.js, auth.test.js — plain `node test/<file>`, no dependenc
 docs/       screenshots for this file
 ```
 
-Shared map links are resolved server-side (`/api/resolve`) because short links have to be
-followed. Only Google, Apple and Waze hosts are allowed.
+Shared map links are resolved server-side (`/api/resolve`, `src/resolve.js`) because short
+links have to be followed. Only Google, Apple and Waze hosts are allowed. Newer Google
+links often carry only the place name, and Google will not serve its page to Cloudflare,
+so a name without coordinates is looked up in Photon instead.
 
 ## Old car screens
 
