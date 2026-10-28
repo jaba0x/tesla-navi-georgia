@@ -1375,9 +1375,11 @@
   };
 
   // Check regularly, but not while the browser tab is in the background
-  setInterval(() => { if (!document.hidden) checkInbox(); }, 7000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkInbox(); });
-  checkInbox();
+  // (skipped entirely while the phone button is hidden)
+  const inboxOn = () => !document.hidden && !$('phoneBtn').hidden;
+  setInterval(() => { if (inboxOn()) checkInbox(); }, 7000);
+  document.addEventListener('visibilitychange', () => { if (inboxOn()) checkInbox(); });
+  if (inboxOn()) checkInbox();
 
   // ---------------------------------------------------------------- theme
   $('themeBtn').onclick = () => {
