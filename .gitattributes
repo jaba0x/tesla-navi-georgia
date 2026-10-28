@@ -1,0 +1,2 @@
+# Third-party files stay byte for byte as published
+public/vendor/** -text

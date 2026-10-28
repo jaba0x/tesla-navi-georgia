@@ -6,6 +6,16 @@
   <meta name="theme-color" content="#111418" />
   <meta name="author" content="Jaba Macharashvili" />
   <title>TeslaNaviGeorgia — navigation for Georgia</title>
+  <!-- Add to Home Screen: opens full screen, with its own name and icon -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="TeslaNavi" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <!-- Open the connection to the map server while the page is still starting -->
+  <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
@@ -32,6 +42,16 @@
         <path d="M23.5 6.5 12.5 22.5h6.2L16.5 33.5l11.2-16.3h-6.4z" fill="currentColor"/>
       </svg>
     </button>
+  </div>
+
+  <!-- While driving: the speed limit, and a warning as a speed camera comes up -->
+  <div class="drive-info">
+    <div class="limit-sign" id="limitSign" title="Speed limit" hidden><span id="limitValue"></span></div>
+    <div class="cam-alert" id="camAlert" role="status" hidden>
+      <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 8H7l1.6-2.2h6.8L17 8h2.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-8A1.5 1.5 0 0 1 4.5 8z"/><circle cx="12" cy="13.2" r="3.3"/></svg>
+      <span class="cam-limit" id="camLimit"></span>
+      <span class="cam-dist" id="camDist"></span>
+    </div>
   </div>
 
   <!-- Zoom while driving. The camera picks its own zoom from speed and the next
@@ -136,6 +156,10 @@
       <button class="btn drive-only" id="stepsToggle">Steps</button>
       <button class="btn danger drive-only" id="endRoute">End</button>
     </div>
+    <div class="route-actions save-row preview-only">
+      <button class="btn" id="homeSave">Set as home</button>
+      <button class="btn" id="workSave">Set as work</button>
+    </div>
 
     <ol id="stepsList" class="steps" hidden></ol>
   </div>
@@ -150,12 +174,12 @@
     <ul id="updatesList" class="updates-list"></ul>
     <footer class="muted small">
       TeslaNaviGeorgia © 2026 Jaba Macharashvili<br />
-      Map © OpenStreetMap contributors · Tiles OpenFreeMap · Terrain Mapzen / AWS · Routing OSRM · Search Photon<br />
+      Map © OpenStreetMap contributors · Tiles OpenFreeMap © OpenMapTiles · Terrain Mapzen / AWS · Routing OSRM · Speed limits Valhalla (FOSSGIS) · Cameras OpenStreetMap · Search Photon<br />
       Not affiliated with Tesla, Inc.
     </footer>
   </aside>
 
-  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js" defer></script>
+  <script src="/vendor/qrcode-generator-2.0.4/qrcode.js" defer></script>
   <script src="/boot.js"></script>
 </body>
 </html>

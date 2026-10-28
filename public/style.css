@@ -247,6 +247,8 @@ body.night .route-meta span:first-child { color: #3fb950; }
 /* Before you press Start the panel shows Start / Cancel, after it shows Steps / End */
 .route .preview-only { display: none; }
 .route.preview .preview-only { display: block; }
+.route.preview .route-actions.preview-only { display: flex; }
+.route .save-row { margin-top: 10px; }
 .route.preview .drive-only { display: none; }
 .route.preview .next-dist { font-size: 26px; }
 .btn {
@@ -262,6 +264,44 @@ body.night .route-meta span:first-child { color: #3fb950; }
 .steps .s-arrow svg { width: 24px; height: 24px; }
 .steps .s-text { overflow: hidden; }
 .steps .s-dist { margin-left: auto; color: var(--muted); white-space: nowrap; }
+
+/* While driving, under the search box: the speed limit sign, and the camera
+   warning beside it. Neither takes taps, so the map stays draggable there. */
+.drive-info {
+  position: absolute; top: 168px; left: 16px; z-index: 5;
+  display: flex; align-items: center; gap: 10px; pointer-events: none;
+}
+body.driving .drive-info { top: 146px; }
+.limit-sign {
+  width: 58px; height: 58px; border-radius: 50%; border: 6px solid #d1242f;
+  background: #fff; color: #111; box-shadow: var(--shadow);
+  display: grid; place-items: center;
+  font-size: 22px; font-weight: 800; letter-spacing: -0.5px; line-height: 1;
+}
+/* More than 5 km/h over it */
+.limit-sign.over { background: #d1242f; color: #fff; border-color: #fff; }
+.cam-alert {
+  height: 52px; padding: 0 18px 0 14px; border-radius: 26px;
+  background: var(--bg); color: var(--fg); box-shadow: var(--shadow);
+  display: flex; align-items: center; gap: 10px;
+  font-size: 19px; font-weight: 700; white-space: nowrap;
+  animation: cam-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.cam-alert .i {
+  flex: none; width: 26px; height: 26px; color: #e8590c;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+.cam-limit {
+  width: 34px; height: 34px; border-radius: 50%; border: 3px solid #d1242f;
+  background: #fff; color: #111; display: grid; place-items: center;
+  font-size: 14px; font-weight: 800; letter-spacing: -0.3px;
+}
+/* Faster than the camera allows */
+.cam-alert.over { background: #d1242f; color: #fff; }
+.cam-alert.over .i { color: #fff; }
+.cam-alert.over .cam-limit { border-color: #fff; }
+@keyframes cam-in { from { opacity: 0; transform: translateY(-8px) scale(0.96); } }
+@media (prefers-reduced-motion: reduce) { .cam-alert { animation: none; } }
 
 /* Updates panel */
 .updates { top: 16px; right: 96px; bottom: 16px; width: min(400px, calc(100vw - 112px)); padding: 16px; display: flex; flex-direction: column; }
@@ -296,6 +336,9 @@ body.night .route-meta span:first-child { color: #3fb950; }
 @media (max-width: 640px) {
   body { font-size: 16px; }
   .updates { right: 16px; left: 16px; width: auto; top: 96px; }
+  .drive-info { gap: 8px; }
+  .limit-sign { width: 50px; height: 50px; border-width: 5px; font-size: 19px; }
+  .cam-alert { height: 46px; padding: 0 14px 0 12px; font-size: 17px; gap: 8px; }
 }
 
 /* Portrait car screens — the 17" display in a Model S or X is 1200 x 1920.
@@ -337,6 +380,12 @@ body.night .route-meta span:first-child { color: #3fb950; }
   #pairQr { width: 220px; height: 220px; }
   .paircode { font-size: 54px; }
   .updates { left: 16px; right: 104px; width: auto; top: 96px; bottom: 16px; }
+
+  .drive-info { top: 184px; gap: 12px; }
+  body.driving .drive-info { top: 160px; }
+  .limit-sign { width: 72px; height: 72px; border-width: 7px; font-size: 27px; }
+  .cam-alert { height: 62px; padding: 0 22px 0 16px; border-radius: 31px; font-size: 23px; }
+  .cam-limit { width: 40px; height: 40px; font-size: 16px; }
 
   .toast { font-size: 19px; bottom: 32px; }
   /* The turn card spans the bottom here, so the zoom buttons continue the
